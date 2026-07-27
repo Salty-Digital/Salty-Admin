@@ -1,11 +1,25 @@
 import { createHmac, timingSafeEqual } from 'crypto'
 
-/** Absolute one-click unsubscribe URL. Deterministic given the secret — no DB row per token needed. */
+/** Absolute human-facing unsubscribe URL (confirmation page). Deterministic given the secret — no DB row per token needed. */
 export function unsubscribeUrl(userId: string): string {
+  const token = signUnsubscribeToken(userId)
+  return `${siteBase()}/unsubscribe/${encodeURIComponent(userId)}?t=${token}`
+}
+
+/**
+ * Absolute one-click unsubscribe URL for the RFC 8058 `List-Unsubscribe` header.
+ * Points at an API route that accepts an unauthenticated POST (what Gmail/Yahoo send),
+ * so it must be distinct from the human confirmation page above.
+ */
+export function oneClickUnsubscribeUrl(userId: string): string {
+  const token = signUnsubscribeToken(userId)
+  return `${siteBase()}/api/unsubscribe?u=${encodeURIComponent(userId)}&t=${token}`
+}
+
+function siteBase(): string {
   const base = process.env.NEXT_PUBLIC_SITE_URL
   if (!base) throw new Error('NEXT_PUBLIC_SITE_URL is not set — cannot build unsubscribe URL.')
-  const token = signUnsubscribeToken(userId)
-  return `${base.replace(/\/+$/, '')}/unsubscribe/${encodeURIComponent(userId)}?t=${token}`
+  return base.replace(/\/+$/, '')
 }
 
 /** Constant-time verify that `token` is a valid signature for `userId`. */

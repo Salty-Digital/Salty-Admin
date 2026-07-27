@@ -12,7 +12,7 @@ export function renderBrandedEmail(input: {
   body: string
   pillLabel: string
   unsubscribeUrl?: string
-}): { subject: string; html: string } {
+}): { subject: string; html: string; text: string } {
   if (input.unsubscribeUrl?.includes('"')) {
     throw new Error('Unsubscribe URL cannot contain double quotes.')
   }
@@ -104,5 +104,20 @@ export function renderBrandedEmail(input: {
 </body>
 </html>`
 
-  return { subject: input.subject, html }
+  // Plain-text alternative. A multipart/alternative message (text + html) avoids the
+  // MIME_HTML_ONLY spam penalty and is what legitimate bulk senders always include.
+  const footerText = input.unsubscribeUrl
+    ? `Unsubscribe: ${input.unsubscribeUrl}\nQuestions? support@saltydigital.ai`
+    : `Questions? support@saltydigital.ai`
+  const text = `${input.subject}
+
+${input.body.trim()}
+
+—
+SALTY
+You're receiving this because you have a Salty account.
+${footerText}
+Salty Digital, Delaware, USA · © 2026 Salty Digital. All rights reserved.`
+
+  return { subject: input.subject, html, text }
 }

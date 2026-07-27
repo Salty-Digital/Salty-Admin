@@ -52,14 +52,43 @@ export async function sendEmail(to: string, subject: string, body: string): Prom
   if (error) throw new Error(error.message)
 }
 
+export interface EmailOptions {
+  /** Plain-text alternative part. Including one avoids the MIME_HTML_ONLY spam penalty. */
+  text?: string
+  /**
+   * One-click unsubscribe URL. When set, adds the RFC 8058 `List-Unsubscribe` and
+   * `List-Unsubscribe-Post` headers that Gmail/Yahoo require on bulk mail. The URL
+   * must accept an unauthenticated POST (see /api/unsubscribe).
+   */
+  listUnsubscribeUrl?: string
+}
+
+/** Build the List-Unsubscribe headers for a message, or undefined when no URL is given. */
+function unsubscribeHeaders(url?: string): Record<string, string> | undefined {
+  if (!url) return undefined
+  return {
+    'List-Unsubscribe': `<${url}>`,
+    'List-Unsubscribe-Post': 'List-Unsubscribe=One-Click',
+  }
+}
+
 /** Send a single HTML email. Throws on failure. */
-export async function sendHtmlEmail(to: string, subject: string, html: string): Promise<void> {
+export async function sendHtmlEmail(
+  to: string,
+  subject: string,
+  html: string,
+  options: EmailOptions = {},
+): Promise<void> {
   const resend = getClient()
   const { error } = await resend.emails.send({
     from: FROM,
     to,
     subject,
     html,
+    ...(options.text ? { text: options.text } : {}),
+    ...(unsubscribeHeaders(options.listUnsubscribeUrl)
+      ? { headers: unsubscribeHeaders(options.listUnsubscribeUrl) }
+      : {}),
   })
   if (error) throw new Error(error.message)
 }
@@ -75,7 +104,7 @@ export interface BulkResult {
  * One address per message so recipients never see each other.
  */
 export async function sendBulkEmail(
-  messages: Array<{ to: string; subject: string; html: string }>,
+  messages: Array<{ to: string; subject: string; html: string } & EmailOptions>,
 ): Promise<BulkResult> {
   const resend = getClient()
   let sent = 0
@@ -85,7 +114,16 @@ export async function sendBulkEmail(
     const chunk = messages.slice(i, i + 100)
     try {
       const { data, error } = await resend.batch.send(
-        chunk.map(message => ({ from: FROM, ...message })),
+        chunk.map(({ to, subject, html, text, listUnsubscribeUrl }) => ({
+          from: FROM,
+          to,
+          subject,
+          html,
+          ...(text ? { text } : {}),
+          ...(unsubscribeHeaders(listUnsubscribeUrl)
+            ? { headers: unsubscribeHeaders(listUnsubscribeUrl) }
+            : {}),
+        })),
       )
       if (error) {
         failed += chunk.length

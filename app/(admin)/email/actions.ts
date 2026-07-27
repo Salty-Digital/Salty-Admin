@@ -5,7 +5,7 @@ import { createServiceClient } from '@/lib/supabase/server'
 import { assertUUID, assertString, assertEnum } from '@/lib/validate'
 import { sendBulkEmail, sendHtmlEmail } from '@/lib/email'
 import { renderBrandedEmail } from '@/lib/emails/branded'
-import { unsubscribeUrl } from '@/lib/unsubscribe'
+import { unsubscribeUrl, oneClickUnsubscribeUrl } from '@/lib/unsubscribe'
 
 export type SegmentType = 'all' | 'tier' | 'active'
 export interface Segment {
@@ -65,12 +65,12 @@ export async function sendSingleEmailAction(
   if (!user) throw new Error('User not found.')
   if (!user.email) throw new Error('This user has no email address.')
 
-  const { subject: subj, html } = renderBrandedEmail({
+  const { subject: subj, html, text } = renderBrandedEmail({
     subject,
     body,
     pillLabel: 'MESSAGE',
   })
-  await sendHtmlEmail(user.email, subj, html)
+  await sendHtmlEmail(user.email, subj, html, { text })
 
   try {
     await db.from('email_campaigns').insert({
@@ -117,7 +117,13 @@ export async function sendBroadcastAction(
       pillLabel: 'PRODUCT UPDATE',
       unsubscribeUrl: unsubscribeUrl(recipient.id),
     })
-    return { to: recipient.email, subject: rendered.subject, html: rendered.html }
+    return {
+      to: recipient.email,
+      subject: rendered.subject,
+      html: rendered.html,
+      text: rendered.text,
+      listUnsubscribeUrl: oneClickUnsubscribeUrl(recipient.id),
+    }
   })
 
   const { sent, failed } = await sendBulkEmail(messages)

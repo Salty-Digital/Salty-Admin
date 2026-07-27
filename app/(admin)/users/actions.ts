@@ -134,12 +134,12 @@ export async function sendUserEmailAction(userId: string, subject: string, body:
   if (!user) throw new Error('User not found.')
   if (!user.email) throw new Error('This user has no email address.')
 
-  const { subject: subj, html } = renderBrandedEmail({
+  const { subject: subj, html, text } = renderBrandedEmail({
     subject: s,
     body: b,
     pillLabel: 'MESSAGE',
   })
-  await sendHtmlEmail(user.email, subj, html)
+  await sendHtmlEmail(user.email, subj, html, { text })
 
   try {
     await db.from('email_campaigns').insert({
