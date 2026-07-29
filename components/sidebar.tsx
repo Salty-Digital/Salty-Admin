@@ -6,7 +6,7 @@ import {
   LayoutDashboard, BarChart3, Users, Ticket, Mail,
   Calendar, Database, Send, Bell, Settings,
   ChevronRight, LogOut, Wifi, Activity, ShieldAlert, MessageSquare,
-  MailPlus, Sparkles, ScanLine, Music, Heart, Compass, Image as ImageIcon,
+  MailPlus, MailX, Sparkles, ScanLine, Music, Heart, Compass, Image as ImageIcon,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { useAdmin } from './admin-provider'
@@ -62,7 +62,8 @@ const NAV_SECTIONS: NavSection[] = [
   {
     label: 'Engagement',
     items: [
-      { href: '/email',     label: 'Email Users', icon: MailPlus,      maxLevel: 2 },
+      { href: '/email',              label: 'Email Users',  icon: MailPlus,      maxLevel: 2 },
+      { href: '/email/suppressions', label: 'Suppressions', icon: MailX,         maxLevel: 2 },
       { href: '/ai-usage',  label: 'AI Usage',    icon: Sparkles,      maxLevel: 3 },
       { href: '/social',    label: 'Social',      icon: Heart,         maxLevel: 3 },
       { href: '/discovery', label: 'Discovery',   icon: Compass,       maxLevel: 3 },

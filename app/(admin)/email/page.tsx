@@ -5,7 +5,7 @@ import { EmailComposer } from './email-composer'
 interface Campaign {
   id: string
   subject: string
-  segment: { type?: string; tier?: string; activeDays?: number; user_id?: string } | null
+  segment: { type?: string; tier?: string; activeDays?: number; user_id?: string; emailCount?: number } | null
   recipient_count: number
   sent_count: number
   failed_count: number
@@ -20,6 +20,7 @@ function segmentLabel(seg: Campaign['segment'], userEmailById: Map<string, strin
   }
   if (seg.type === 'tier') return `Tier: ${seg.tier}`
   if (seg.type === 'active') return `Active ${seg.activeDays}d`
+  if (seg.type === 'custom') return `Custom list (${seg.emailCount ?? '?'})`
   return seg.type
 }
 

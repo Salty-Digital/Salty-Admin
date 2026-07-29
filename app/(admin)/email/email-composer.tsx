@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useState, useTransition } from 'react'
+import { useEffect, useMemo, useState, useTransition } from 'react'
 import { Loader2, Mail, Users } from 'lucide-react'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { countRecipientsAction, sendBroadcastAction, sendSingleEmailAction, type Segment } from './actions'
@@ -98,6 +98,7 @@ function BroadcastForm() {
   const [segType, setSegType] = useState<Segment['type']>('all')
   const [tier, setTier] = useState('free')
   const [activeDays, setActiveDays] = useState(30)
+  const [customRaw, setCustomRaw] = useState('')
 
   const [count, setCount] = useState<number | null>(null)
   const [countLoading, setCountLoading] = useState(false)
@@ -105,23 +106,38 @@ function BroadcastForm() {
   const [confirming, setConfirming] = useState(false)
   const [pending, startTransition] = useTransition()
 
+  // Deduped, validated addresses parsed from the pasted custom list.
+  const customEmails = useMemo(() => {
+    const seen = new Set<string>()
+    for (const piece of customRaw.split(/[\s,;]+/)) {
+      const email = piece.trim().toLowerCase()
+      if (email && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) seen.add(email)
+    }
+    return [...seen]
+  }, [customRaw])
+
   const segment: Segment = {
     type: segType,
     ...(segType === 'tier' ? { tier } : {}),
     ...(segType === 'active' ? { activeDays } : {}),
+    ...(segType === 'custom' ? { emails: customEmails } : {}),
   }
 
-  // Refresh the recipient count whenever the segment changes.
+  // Refresh the recipient count whenever the segment changes (debounced so typing a
+  // custom list doesn't fire a query per keystroke).
+  const customKey = customEmails.join(',')
   useEffect(() => {
     let cancelled = false
     setCountLoading(true)
-    countRecipientsAction(segment)
-      .then(n => { if (!cancelled) setCount(n) })
-      .catch(() => { if (!cancelled) setCount(null) })
-      .finally(() => { if (!cancelled) setCountLoading(false) })
-    return () => { cancelled = true }
+    const timer = setTimeout(() => {
+      countRecipientsAction(segment)
+        .then(n => { if (!cancelled) setCount(n) })
+        .catch(() => { if (!cancelled) setCount(null) })
+        .finally(() => { if (!cancelled) setCountLoading(false) })
+    }, 300)
+    return () => { cancelled = true; clearTimeout(timer) }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [segType, tier, activeDays])
+  }, [segType, tier, activeDays, customKey])
 
   function attemptSend() {
     setResult(null)
@@ -160,7 +176,7 @@ function BroadcastForm() {
       <div>
         <label className={labelCls}>Recipients</label>
         <div className="flex flex-wrap gap-2">
-          {([['all', 'All users'], ['tier', 'By tier'], ['active', 'Active users']] as const).map(([val, lbl]) => (
+          {([['all', 'All users'], ['tier', 'By tier'], ['active', 'Active users'], ['custom', 'Custom list']] as const).map(([val, lbl]) => (
             <button
               key={val}
               type="button"
@@ -193,6 +209,23 @@ function BroadcastForm() {
         </div>
       )}
 
+      {segType === 'custom' && (
+        <div>
+          <label className={labelCls}>Recipient emails</label>
+          <textarea
+            value={customRaw}
+            onChange={e => setCustomRaw(e.target.value)}
+            rows={4}
+            placeholder="Paste email addresses, separated by commas, spaces, or new lines…"
+            className={inputCls}
+          />
+          <p className="mt-1.5 text-[12px] text-salty-muted">
+            {customEmails.length} valid address{customEmails.length !== 1 ? 'es' : ''} entered. Every
+            address is emailed; users who are banned or unsubscribed are skipped.
+          </p>
+        </div>
+      )}
+
       <div className="flex items-center gap-1.5 text-[13px] text-salty-secondary">
         <Users className="h-3.5 w-3.5" />
         {countLoading ? 'Counting recipients…' : (
@@ -214,7 +247,7 @@ function BroadcastForm() {
       {confirming ? (
         <div className="rounded-lg border border-[#F0C4C4] bg-[#FDEDED] p-3 space-y-2">
           <p className="text-[13px] text-[#BF4A3A]">
-            Send this email to <strong>{count ?? 0}</strong> user{count !== 1 ? 's' : ''}? This cannot be undone.
+            Send this email to <strong>{count ?? 0}</strong> recipient{count !== 1 ? 's' : ''}? This cannot be undone.
           </p>
           <div className="flex gap-2">
             <button onClick={send} disabled={pending} className="flex items-center gap-2 rounded-lg bg-ember px-4 py-2 text-[13px] font-semibold text-white hover:bg-[#D44D15] disabled:opacity-60">
