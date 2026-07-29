@@ -29,14 +29,19 @@ export async function proxy(request: NextRequest) {
 
   const { pathname } = request.nextUrl
 
-  // Paths that must render for a NOT-logged-in visitor. The invite acceptance
-  // page is bearer-token-authenticated by its own server action, so the middleware
-  // must let anonymous requests through — otherwise every invite link redirects
-  // to /login and the token is never seen.
+  // Paths that must render/run for a NOT-logged-in caller. Each authenticates itself
+  // by its own means, so the proxy must let anonymous requests through — otherwise they
+  // get bounced to /login and their own token/signature is never seen:
+  //  - /accept-invite       — bearer-token invite links
+  //  - /unsubscribe/[id]     — HMAC-signed human unsubscribe confirmation page
+  //  - /api/unsubscribe      — the RFC 8058 one-click POST Gmail/Yahoo send (HMAC-signed)
+  //  - /api/webhooks/*       — Resend webhooks, verified by their Svix signature
   const isPublicPath =
     pathname === '/login' ||
     pathname.startsWith('/accept-invite') ||
-    pathname.startsWith('/unsubscribe')
+    pathname.startsWith('/unsubscribe') ||
+    pathname.startsWith('/api/unsubscribe') ||
+    pathname.startsWith('/api/webhooks')
 
   if (!user && !isPublicPath) {
     const url = request.nextUrl.clone()
