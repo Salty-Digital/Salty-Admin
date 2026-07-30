@@ -1,5 +1,6 @@
 import { requireAdmin } from '@/lib/auth'
 import { createServiceClient } from '@/lib/supabase/server'
+import { createV2Client, isV2Configured } from '@/lib/supabase/v2'
 import { SignupsBarChart, CumulativeAreaChart } from '../beta-signups/charts'
 import {
   Users, UserPlus, Activity, Bell, Mail, ShieldAlert, Ticket, Sparkles, Server, AlertTriangle, Zap,
@@ -24,6 +25,26 @@ async function fetchAll<T>(db: DB, table: string, cols: string, since?: string):
     if (rows.length < PAGE) break
   }
   return all
+}
+
+/** Lowercased emails from the v2 beta_signups waitlist, or null if v2 isn't reachable. */
+async function fetchBetaEmails(): Promise<Set<string> | null> {
+  if (!isV2Configured()) return null
+  try {
+    const v2 = createV2Client()
+    const set = new Set<string>()
+    const PAGE = 1000
+    for (let p = 0; p < 60; p++) {
+      const { data, error } = await v2.from('beta_signups').select('email').range(p * PAGE, p * PAGE + PAGE - 1)
+      if (error) return null
+      const rows = (data ?? []) as unknown as { email: string | null }[]
+      for (const r of rows) if (r.email) set.add(r.email.trim().toLowerCase())
+      if (rows.length < PAGE) break
+    }
+    return set
+  } catch {
+    return null
+  }
 }
 
 function tally(values: (string | null | undefined)[]): Bucket[] {
@@ -67,8 +88,8 @@ async function getMainAnalytics() {
   const now = Date.now()
 
   const [users, tickets, api, campaigns, suppressions, notifs, ai] = await Promise.all([
-    fetchAll<{ created_at: string | null; tier: string | null; last_seen_at: string | null; zip_code: string | null }>(
-      db, 'users', 'created_at, tier, last_seen_at, zip_code'),
+    fetchAll<{ email: string | null; created_at: string | null; tier: string | null; last_seen_at: string | null; zip_code: string | null }>(
+      db, 'users', 'email, created_at, tier, last_seen_at, zip_code'),
     fetchAll<{ source: string | null; category: string | null; imported_at: string | null }>(
       db, 'tickets', 'source, category, imported_at'),
     fetchAll<{ external_api: string | null; model: string | null; success: boolean | null; latency_ms: number | null; created_at: string | null }>(
@@ -86,6 +107,16 @@ async function getMainAnalytics() {
   const usersDaily = dailyCounts(users.map(u => u.created_at), 30)
   const usersCumulative = cumulativeFrom(usersDaily, totalUsers - usersDaily.reduce((s, d) => s + d.count, 0))
   const activeWithin = (ms: number) => users.filter(u => u.last_seen_at && now - new Date(u.last_seen_at).getTime() <= ms).length
+
+  // User source: team (@saltydigital.ai) / signup link (email in v2 beta_signups) / external.
+  const betaEmails = await fetchBetaEmails()
+  const sourceAvailable = betaEmails !== null
+  const bySource = tally(users.map(u => {
+    const email = (u.email ?? '').trim().toLowerCase()
+    if (email.endsWith('@saltydigital.ai')) return 'team'
+    if (!betaEmails) return 'unknown'
+    return betaEmails.has(email) ? 'signup link' : 'external'
+  }))
 
   // Tickets
   const ticketsDaily = dailyCounts(tickets.map(t => t.imported_at), 30)
@@ -116,6 +147,7 @@ async function getMainAnalytics() {
       daily: usersDaily, cumulative: usersCumulative,
       dau: activeWithin(DAY), wau: activeWithin(7 * DAY), mau: activeWithin(30 * DAY),
       byTier: tally(users.map(u => u.tier ?? 'free')), byZip: tally(users.map(u => u.zip_code)),
+      bySource, sourceAvailable,
     },
     tickets: { total: tickets.length, daily: ticketsDaily, bySource: tally(tickets.map(t => t.source)), byCategory: tally(tickets.map(t => t.category)) },
     api: {
@@ -239,9 +271,12 @@ export default async function V2AnalyticsPage() {
         <Panel title="New Users (30d)"><div className="px-4 pb-2 pt-4"><SignupsBarChart data={d.users.daily} label="New users" color="#5A9E6F" /></div></Panel>
         <Panel title="Cumulative Users"><div className="px-4 pb-2 pt-4"><CumulativeAreaChart data={d.users.cumulative} label="Total users" color="#E8581A" /></div></Panel>
       </div>
+      <Panel title="Active Users" subtitle="by last_seen_at">
+        <TripleStat items={[{ label: 'Daily (24h)', value: d.users.dau }, { label: 'Weekly (7d)', value: d.users.wau }, { label: 'Monthly (30d)', value: d.users.mau }]} />
+      </Panel>
       <div className="grid gap-5 lg:grid-cols-3">
-        <Panel title="Active Users" subtitle="by last_seen_at">
-          <TripleStat items={[{ label: 'Daily (24h)', value: d.users.dau }, { label: 'Weekly (7d)', value: d.users.wau }, { label: 'Monthly (30d)', value: d.users.mau }]} />
+        <Panel title="User Source" subtitle={d.users.sourceAvailable ? 'team / signup link / external' : 'connect v2 for signup-link detection'}>
+          <BreakdownList items={d.users.bySource} accent="#E8581A" />
         </Panel>
         <Panel title="Tiers"><BreakdownList items={d.users.byTier} accent="#C8A96E" /></Panel>
         <Panel title="Top ZIP Codes"><BreakdownList items={d.users.byZip} accent="#5A8FBF" /></Panel>

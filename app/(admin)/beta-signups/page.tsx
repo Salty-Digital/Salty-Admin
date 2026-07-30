@@ -127,6 +127,12 @@ function countByArray(rows: SignupRow[], key: (r: SignupRow) => string[] | null 
   return [...m.entries()].map(([name, value]) => ({ name, value })).sort((a, b) => b.value - a.value)
 }
 
+/** Beta-page source: team = @saltydigital.ai email; anyone else on the waitlist = signup link.
+ *  ("external" — not in beta_signups — can't occur on this page, since every row IS a signup.) */
+function sourceOf(email: string | null): 'team' | 'signup link' {
+  return email && email.trim().toLowerCase().endsWith('@saltydigital.ai') ? 'team' : 'signup link'
+}
+
 const dayKey = (iso: string) => new Date(iso).toISOString().slice(0, 10)
 
 function weekStartKey(iso: string): string {
@@ -182,7 +188,7 @@ interface ListRow { name: string; email: string | null; source: string | null; c
 async function getBetaData(scope: Scope, granularity: Granularity, status: Status) {
   const db = createV2Client()
   const allRows = await fetchAllSignups(db)
-  const rows = scope === 'external' ? allRows.filter(r => r.source_classification === 'external') : allRows
+  const rows = scope === 'external' ? allRows.filter(r => sourceOf(r.email) !== 'team') : allRows
 
   const [accounts, ticketUserIds] = await Promise.all([fetchMainAccounts(), fetchMainTicketUserIds()])
 
@@ -197,7 +203,8 @@ async function getBetaData(scope: Scope, granularity: Granularity, status: Statu
   const total = rows.length
   const unsubscribed = rows.filter(r => r.unsubscribed_at).length
   const invited = rows.filter(r => r.invite_sent_at).length
-  const external = rows.filter(r => r.source_classification === 'external').length
+  const teamCount = rows.filter(r => sourceOf(r.email) === 'team').length
+  const signupCount = total - teamCount
 
   // ── Signed-up matching against the MAIN DB users ──
   let accountCreated = 0
@@ -234,7 +241,7 @@ async function getBetaData(scope: Scope, granularity: Granularity, status: Statu
   const withStatus: ListRow[] = rows.map(r => ({
     name: [r.first_name, r.last_name].filter(Boolean).join(' ') || '—',
     email: r.email,
-    source: r.source_classification,
+    source: sourceOf(r.email),
     created_at: r.created_at,
     signedUp: r.email ? accounts.has(r.email.trim().toLowerCase()) : false,
   }))
@@ -246,11 +253,11 @@ async function getBetaData(scope: Scope, granularity: Granularity, status: Statu
     .slice(0, 60)
 
   return {
-    total, invited, unsubscribed, external, thisWeek, weekGrowth,
+    total, invited, unsubscribed, teamCount, signupCount, thisWeek, weekGrowth,
     accountCreated, notSignedUp, activated, medianTimeToAccount,
     referred, organic, totalReferralsDriven, viralCoefficient,
     series, cumulative: cumulative(rows, series),
-    bySource: countBy(rows, r => r.source_classification),
+    bySource: countBy(rows, r => sourceOf(r.email)),
     byUtmSource: countBy(rows, r => r.utm_source),
     byUtmMedium: countBy(rows, r => r.utm_medium),
     byUtmCampaign: countBy(rows, r => r.utm_campaign),
@@ -355,11 +362,12 @@ function Funnel({ stages, total }: { stages: { label: string; value: number }[];
 }
 
 const SOURCE_STYLE: Record<string, string> = {
-  external: 'bg-[#EAF4EE] text-[#3E8A5A]', team: 'bg-[#EBF2FA] text-[#3A72A8]',
-  family: 'bg-[#F3EBF8] text-[#7B44A8]', flagged: 'bg-[#FFF8E6] text-[#8A6830]', test: 'bg-stone text-salty-secondary',
+  team: 'bg-[#EBF2FA] text-[#3A72A8]',
+  'signup link': 'bg-[#EAF4EE] text-[#3E8A5A]',
+  external: 'bg-[#FFF8E6] text-[#8A6830]',
 }
 function SourceBadge({ value }: { value: string | null }) {
-  const key = value ?? 'external'
+  const key = value ?? 'signup link'
   return <span className={`inline-block rounded-full px-2 py-0.5 text-[11px] font-semibold ${SOURCE_STYLE[key] ?? 'bg-stone text-salty-secondary'}`}>{key}</span>
 }
 
@@ -435,7 +443,7 @@ export default async function BetaSignupsPage({ searchParams }: { searchParams: 
   ]
 
   const breakdowns: Array<{ title: string; subtitle?: string; items: Bucket[]; accent: string }> = [
-    { title: 'Signup Source', subtitle: 'source_classification', items: d.bySource, accent: '#E8581A' },
+    { title: 'Source', subtitle: 'team vs signup link', items: d.bySource, accent: '#E8581A' },
     { title: 'UTM Source', items: d.byUtmSource, accent: '#5A8FBF' },
     { title: 'UTM Medium', items: d.byUtmMedium, accent: '#5A8FBF' },
     { title: 'UTM Campaign', items: d.byUtmCampaign, accent: '#5A8FBF' },
@@ -454,9 +462,9 @@ export default async function BetaSignupsPage({ searchParams }: { searchParams: 
       <div className="flex flex-wrap items-end justify-between gap-3">
         <div>
           <h1 className="font-sora text-[20px] font-bold text-salty-text">Beta Signups</h1>
-          <p className="text-[13px] text-salty-muted">Waitlist from the v2 DB · signed-up matched against your main DB · {d.external.toLocaleString()} external</p>
+          <p className="text-[13px] text-salty-muted">Waitlist from the v2 DB · signed-up matched against your main DB · {d.signupCount.toLocaleString()} signup link · {d.teamCount.toLocaleString()} team</p>
         </div>
-        <Tabs active={scope} options={[{ key: 'all', label: 'All', href: q('all', granularity, status) }, { key: 'external', label: 'External only', href: q('external', granularity, status) }]} />
+        <Tabs active={scope} options={[{ key: 'all', label: 'All', href: q('all', granularity, status) }, { key: 'external', label: 'Exclude team', href: q('external', granularity, status) }]} />
       </div>
 
       <div className="grid grid-cols-2 gap-4 lg:grid-cols-5">

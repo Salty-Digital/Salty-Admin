@@ -1,6 +1,7 @@
 import Link from 'next/link'
 import { requireAdmin } from '@/lib/auth'
 import { createServiceClient } from '@/lib/supabase/server'
+import { createV2Client, isV2Configured } from '@/lib/supabase/v2'
 import { maskEmail } from '@/lib/privacy'
 import { sanitizeOrFilterTerm } from '@/lib/validate'
 import { Badge } from '@/components/ui/badge'
@@ -17,6 +18,15 @@ const TIER_COLORS: Record<string, string> = {
   free:    'bg-stone text-salty-muted',
   premium: 'bg-gold-light text-gold',
   family:  'bg-ember-light text-ember',
+}
+
+/** Source: team (@saltydigital.ai) / signup link (in v2 beta_signups) / external. `—` when v2 is off. */
+function sourceBadge(src: 'team' | 'signup link' | 'external' | null) {
+  if (!src) return <span className="text-[12px] text-salty-muted">—</span>
+  const style = src === 'team' ? 'bg-[#EBF2FA] text-[#3A72A8]'
+    : src === 'signup link' ? 'bg-[#EAF4EE] text-[#3E8A5A]'
+      : 'bg-[#FFF8E6] text-[#8A6830]'
+  return <span className={`rounded-full px-2 py-0.5 text-[11px] font-semibold ${style}`}>{src}</span>
 }
 
 export default async function UsersPage({ searchParams }: PageProps) {
@@ -58,6 +68,25 @@ export default async function UsersPage({ searchParams }: PageProps) {
   const gmailSet = new Set((gmailConns ?? []).map((g: { user_id: string }) => g.user_id))
   const imapMap = new Map((imapConns ?? []).map((c: { user_id: string; provider: string }) => [c.user_id, c.provider]))
 
+  // Source classification — cross-reference this page's emails against the v2 beta_signups waitlist.
+  // Assumes beta_signups.email is stored lowercased (typical); only queries the ~50 users shown.
+  const pageEmails = (users ?? []).map(u => (u.email ?? '').trim().toLowerCase()).filter(Boolean)
+  let betaSet: Set<string> | null = null
+  if (isV2Configured() && pageEmails.length > 0) {
+    try {
+      const v2 = createV2Client()
+      const { data, error } = await v2.from('beta_signups').select('email').in('email', pageEmails)
+      if (!error) betaSet = new Set((data ?? []).map((r: { email: string | null }) => (r.email ?? '').trim().toLowerCase()).filter(Boolean))
+    } catch { betaSet = null }
+  }
+  const classify = (email: string | null): 'team' | 'signup link' | 'external' | null => {
+    const e = (email ?? '').trim().toLowerCase()
+    if (!e) return null
+    if (e.endsWith('@saltydigital.ai')) return 'team'
+    if (!betaSet) return null
+    return betaSet.has(e) ? 'signup link' : 'external'
+  }
+
   return (
     <div className="p-7 space-y-5">
       <div className="flex items-center justify-between">
@@ -85,14 +114,14 @@ export default async function UsersPage({ searchParams }: PageProps) {
           <table className="w-full">
             <thead>
               <tr className="border-b border-salty-border bg-cream">
-                {['User','Username','Tier','Zip','Tickets','Connection','Joined',''].map(h => (
+                {['User','Username','Tier','Source','Zip','Tickets','Connection','Joined',''].map(h => (
                   <th key={h} className="px-4 py-3 text-left text-[11px] font-semibold uppercase tracking-[0.06em] text-salty-muted">{h}</th>
                 ))}
               </tr>
             </thead>
             <tbody>
               {(users ?? []).length === 0 ? (
-                <tr><td colSpan={8} className="px-4 py-10 text-center text-[13px] text-salty-muted">No users found</td></tr>
+                <tr><td colSpan={9} className="px-4 py-10 text-center text-[13px] text-salty-muted">No users found</td></tr>
               ) : (
                 (users ?? []).map(u => (
                   <tr key={u.id} className="border-b border-salty-border last:border-0 transition-colors hover:bg-cream cursor-default">
@@ -111,6 +140,7 @@ export default async function UsersPage({ searchParams }: PageProps) {
                         {u.tier ?? 'free'}
                       </span>
                     </td>
+                    <td className="px-4 py-3">{sourceBadge(classify(u.email))}</td>
                     <td className="px-4 py-3 text-[12px] text-salty-secondary">{u.zip_code ?? '—'}</td>
                     <td className="px-4 py-3 text-[13px] text-salty-text font-medium">{ticketMap[u.id] ?? 0}</td>
                     <td className="px-4 py-3">

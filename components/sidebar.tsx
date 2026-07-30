@@ -70,7 +70,7 @@ const NAV_SECTIONS: NavSection[] = [
     ],
   },
   {
-    label: 'V2 (Pawel)',
+    label: 'Signup Analytics',
     items: [
       { href: '/beta-signups', label: 'Beta Signups', icon: Rocket,    maxLevel: 3 },
       { href: '/v2-analytics', label: 'V2 Analytics', icon: LineChart, maxLevel: 3 },

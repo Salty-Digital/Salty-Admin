@@ -65,20 +65,7 @@ export function renderBrandedEmail(input: {
     </tr>
 
     <tr>
-      <td style="padding:38px 32px 8px 32px;">
-        <table width="100%" cellpadding="0" cellspacing="0" border="0">
-          <tr>
-            <td style="font-family:'Helvetica Neue',Helvetica,Arial,sans-serif; font-size:12px; font-weight:700; color:#E8581A; letter-spacing:1.6px; padding-bottom:12px;">FROM SALTY</td>
-          </tr>
-          <tr>
-            <td style="font-family:'Helvetica Neue',Helvetica,Arial,sans-serif; font-size:36px; font-weight:700; color:#1A0848; line-height:40px;">${subject}</td>
-          </tr>
-        </table>
-      </td>
-    </tr>
-
-    <tr>
-      <td style="padding:20px 32px 30px 32px; font-family:'Helvetica Neue',Helvetica,Arial,sans-serif; font-size:16px; line-height:25px; color:#1a1530;">
+      <td style="padding:36px 32px 30px 32px; font-family:'Helvetica Neue',Helvetica,Arial,sans-serif; font-size:16px; line-height:25px; color:#1a1530;">
         ${bodyHtml}
       </td>
     </tr>
