@@ -99,6 +99,7 @@ function BroadcastForm() {
   const [tier, setTier] = useState('free')
   const [activeDays, setActiveDays] = useState(30)
   const [customRaw, setCustomRaw] = useState('')
+  const [betaStatus, setBetaStatus] = useState<'all' | 'signed' | 'unsigned'>('all')
 
   const [count, setCount] = useState<number | null>(null)
   const [countLoading, setCountLoading] = useState(false)
@@ -121,6 +122,7 @@ function BroadcastForm() {
     ...(segType === 'tier' ? { tier } : {}),
     ...(segType === 'active' ? { activeDays } : {}),
     ...(segType === 'custom' ? { emails: customEmails } : {}),
+    ...(segType === 'beta' ? { betaStatus } : {}),
   }
 
   // Refresh the recipient count whenever the segment changes (debounced so typing a
@@ -137,7 +139,7 @@ function BroadcastForm() {
     }, 300)
     return () => { cancelled = true; clearTimeout(timer) }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [segType, tier, activeDays, customKey])
+  }, [segType, tier, activeDays, customKey, betaStatus])
 
   function attemptSend() {
     setResult(null)
@@ -176,7 +178,7 @@ function BroadcastForm() {
       <div>
         <label className={labelCls}>Recipients</label>
         <div className="flex flex-wrap gap-2">
-          {([['all', 'All users'], ['tier', 'By tier'], ['active', 'Active users'], ['custom', 'Custom list']] as const).map(([val, lbl]) => (
+          {([['all', 'All users'], ['tier', 'By tier'], ['active', 'Active users'], ['custom', 'Custom list'], ['beta', 'Beta signups']] as const).map(([val, lbl]) => (
             <button
               key={val}
               type="button"
@@ -222,6 +224,30 @@ function BroadcastForm() {
           <p className="mt-1.5 text-[12px] text-salty-muted">
             {customEmails.length} valid address{customEmails.length !== 1 ? 'es' : ''} entered. Every
             address is emailed; users who are banned or unsubscribed are skipped.
+          </p>
+        </div>
+      )}
+
+      {segType === 'beta' && (
+        <div>
+          <label className={labelCls}>Beta signup status</label>
+          <div className="flex flex-wrap gap-2">
+            {([['all', 'All beta signups'], ['unsigned', 'Not signed up yet'], ['signed', 'Already signed up']] as const).map(([val, lbl]) => (
+              <button
+                key={val}
+                type="button"
+                onClick={() => setBetaStatus(val)}
+                className={`rounded-lg border px-3 py-1.5 text-[12px] font-medium transition-colors ${
+                  betaStatus === val ? 'border-ember bg-ember-light text-ember' : 'border-salty-border bg-cream text-salty-secondary hover:bg-stone'
+                }`}
+              >
+                {lbl}
+              </button>
+            ))}
+          </div>
+          <p className="mt-1.5 text-[12px] text-salty-muted">
+            From the v2 beta_signups waitlist. &quot;Signed up&quot; = the email exists in your main users.
+            Beta-unsubscribed and bounced/complained addresses are skipped automatically.
           </p>
         </div>
       )}

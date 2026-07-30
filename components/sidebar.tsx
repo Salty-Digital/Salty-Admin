@@ -6,7 +6,7 @@ import {
   LayoutDashboard, BarChart3, Users, Ticket, Mail,
   Calendar, Database, Send, Bell, Settings,
   ChevronRight, LogOut, Wifi, Activity, ShieldAlert, MessageSquare,
-  MailPlus, MailX, Sparkles, ScanLine, Music, Heart, Compass, Image as ImageIcon, Rocket,
+  MailPlus, MailX, Sparkles, ScanLine, Music, Heart, Compass, Image as ImageIcon, Rocket, LineChart,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { useAdmin } from './admin-provider'
@@ -39,9 +39,8 @@ const NAV_SECTIONS: NavSection[] = [
   {
     label: 'Overview',
     items: [
-      { href: '/',             label: 'Dashboard',    icon: LayoutDashboard, maxLevel: 4 },
-      { href: '/analytics',    label: 'Analytics',    icon: BarChart3,       maxLevel: 3 },
-      { href: '/beta-signups', label: 'Beta Signups', icon: Rocket,          maxLevel: 3 },
+      { href: '/',          label: 'Dashboard', icon: LayoutDashboard, maxLevel: 4 },
+      { href: '/analytics', label: 'Analytics', icon: BarChart3,       maxLevel: 3 },
     ],
   },
   {
@@ -68,6 +67,13 @@ const NAV_SECTIONS: NavSection[] = [
       { href: '/ai-usage',  label: 'AI Usage',    icon: Sparkles,      maxLevel: 3 },
       { href: '/social',    label: 'Social',      icon: Heart,         maxLevel: 3 },
       { href: '/discovery', label: 'Discovery',   icon: Compass,       maxLevel: 3 },
+    ],
+  },
+  {
+    label: 'V2 (Pawel)',
+    items: [
+      { href: '/beta-signups', label: 'Beta Signups', icon: Rocket,    maxLevel: 3 },
+      { href: '/v2-analytics', label: 'V2 Analytics', icon: LineChart, maxLevel: 3 },
     ],
   },
   {

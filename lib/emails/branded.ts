@@ -12,7 +12,11 @@ export function renderBrandedEmail(input: {
   body: string
   pillLabel: string
   unsubscribeUrl?: string
+  /** Footer "why you're receiving this" line. Defaults to the account line. */
+  reasonLine?: string
 }): { subject: string; html: string; text: string } {
+  const reasonText = input.reasonLine ?? "You're receiving this because you have a Salty account."
+  const reasonHtml = escapeHtml(reasonText)
   if (input.unsubscribeUrl?.includes('"')) {
     throw new Error('Unsubscribe URL cannot contain double quotes.')
   }
@@ -86,7 +90,7 @@ export function renderBrandedEmail(input: {
             <td style="font-family:'Helvetica Neue',Helvetica,Arial,sans-serif; font-size:18px; font-weight:700; color:#ffffff; letter-spacing:6px; padding-bottom:12px; padding-left:6px;">SALTY</td>
           </tr>
           <tr>
-            <td style="font-family:'Helvetica Neue',Helvetica,Arial,sans-serif; font-size:14px; line-height:21px; color:#B9B2D6; padding-bottom:14px;">You're receiving this because you have a Salty account.</td>
+            <td style="font-family:'Helvetica Neue',Helvetica,Arial,sans-serif; font-size:14px; line-height:21px; color:#B9B2D6; padding-bottom:14px;">${reasonHtml}</td>
           </tr>
           <tr>
             <td style="font-family:'Helvetica Neue',Helvetica,Arial,sans-serif; font-size:13px; line-height:21px; color:#B9B2D6;">${footerContact}<br><span style="color:#8E86AD;">Salty Digital, Delaware, USA &middot; &copy; 2026 Salty Digital. All rights reserved.</span></td>
@@ -115,7 +119,7 @@ ${input.body.trim()}
 
 —
 SALTY
-You're receiving this because you have a Salty account.
+${reasonText}
 ${footerText}
 Salty Digital, Delaware, USA · © 2026 Salty Digital. All rights reserved.`
 

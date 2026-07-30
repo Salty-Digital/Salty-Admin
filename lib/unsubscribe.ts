@@ -34,3 +34,31 @@ function signUnsubscribeToken(userId: string): string {
   if (!secret) throw new Error('UNSUBSCRIBE_TOKEN_SECRET is not set — cannot sign unsubscribe token.')
   return createHmac('sha256', secret).update(userId).digest('base64url')
 }
+
+// ── Beta waitlist (v2 beta_signups) unsubscribe ──────────────────────────────
+// Beta recipients have no main-DB account, so they're identified by their beta_signups
+// row id and written back to the v2 table. Tokens are namespaced with a `beta:` prefix so
+// a beta token can never be swapped in for a user unsubscribe token (or vice-versa).
+
+/** Absolute human-facing beta-waitlist unsubscribe URL (confirmation page). */
+export function betaUnsubscribeUrl(betaId: string): string {
+  return `${siteBase()}/unsubscribe/beta?id=${encodeURIComponent(betaId)}&t=${signBetaToken(betaId)}`
+}
+
+/** Absolute one-click (RFC 8058) beta-waitlist unsubscribe URL for the List-Unsubscribe header. */
+export function betaOneClickUnsubscribeUrl(betaId: string): string {
+  return `${siteBase()}/api/unsubscribe/beta?id=${encodeURIComponent(betaId)}&t=${signBetaToken(betaId)}`
+}
+
+/** Constant-time verify that `token` is a valid signature for `betaId`. */
+export function verifyBetaUnsubscribeToken(betaId: string, token: string): boolean {
+  const expected = signBetaToken(betaId)
+  if (expected.length !== token.length) return false
+  return timingSafeEqual(Buffer.from(expected), Buffer.from(token))
+}
+
+function signBetaToken(betaId: string): string {
+  const secret = process.env.UNSUBSCRIBE_TOKEN_SECRET
+  if (!secret) throw new Error('UNSUBSCRIBE_TOKEN_SECRET is not set — cannot sign unsubscribe token.')
+  return createHmac('sha256', secret).update(`beta:${betaId}`).digest('base64url')
+}

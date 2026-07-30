@@ -5,15 +5,19 @@ import { createServiceClient } from '@/lib/supabase/server'
 import { assertUUID, assertString, assertEnum } from '@/lib/validate'
 import { sendBulkEmail, sendHtmlEmail } from '@/lib/email'
 import { renderBrandedEmail } from '@/lib/emails/branded'
-import { unsubscribeUrl, oneClickUnsubscribeUrl } from '@/lib/unsubscribe'
+import { unsubscribeUrl, oneClickUnsubscribeUrl, betaUnsubscribeUrl, betaOneClickUnsubscribeUrl } from '@/lib/unsubscribe'
+import { createV2Client } from '@/lib/supabase/v2'
 
-export type SegmentType = 'all' | 'tier' | 'active' | 'custom'
+export type SegmentType = 'all' | 'tier' | 'active' | 'custom' | 'beta'
+export type BetaStatus = 'all' | 'signed' | 'unsigned'
 export interface Segment {
   type: SegmentType
   tier?: string
   activeDays?: number
   /** For type 'custom': the admin-entered recipient email addresses. */
   emails?: string[]
+  /** For type 'beta': which slice of the v2 beta_signups waitlist to email. */
+  betaStatus?: BetaStatus
 }
 
 const VALID_TIERS = ['free', 'premium', 'family'] as const
@@ -53,8 +57,9 @@ async function dropSuppressed<T extends { email: string }>(
 /** Resolve the list of recipient emails for a segment, excluding banned and unsubscribed users. */
 async function resolveRecipients(
   segment: Segment,
-): Promise<Array<{ id: string | null; email: string }>> {
+): Promise<Array<{ id: string | null; email: string; betaId?: string }>> {
   if (segment.type === 'custom') return resolveCustomRecipients(segment.emails)
+  if (segment.type === 'beta') return resolveBetaRecipients(segment.betaStatus ?? 'all')
 
   const db = createServiceClient()
   let query = db.from('users').select('id, email, banned_until, unsubscribed_from_marketing')
@@ -128,6 +133,64 @@ async function resolveCustomRecipients(
   return dropSuppressed(db, recipients)
 }
 
+/**
+ * Resolve recipients from the v2 beta_signups waitlist, sliced by whether the address has become a
+ * real account in the MAIN DB `users` table ("signed up"). Beta-unsubscribed addresses are always
+ * skipped; signed-up users additionally honor their main-DB ban / marketing-unsubscribe. Requires
+ * the v2 database to be configured (throws V2NotConfiguredError otherwise).
+ */
+async function resolveBetaRecipients(status: BetaStatus): Promise<Array<{ id: string | null; email: string; betaId?: string }>> {
+  const PAGE = 1000
+
+  // 1) Pull the (non-unsubscribed) beta signups from the v2 database, keeping each row's id
+  //    so waitlist recipients (no account) get a working per-address unsubscribe link.
+  const v2 = createV2Client()
+  const betaByEmail = new Map<string, string>() // email → beta_signups.id
+  for (let page = 0; page < 60; page++) {
+    const { data, error } = await v2.from('beta_signups').select('id, email, unsubscribed_at').range(page * PAGE, page * PAGE + PAGE - 1)
+    if (error) throw new Error(error.message)
+    const rows = (data ?? []) as unknown as { id: string; email: string | null; unsubscribed_at: string | null }[]
+    for (const r of rows) {
+      if (r.unsubscribed_at) continue
+      if (r.email && r.email.includes('@') && typeof r.id === 'string') betaByEmail.set(r.email.trim().toLowerCase(), r.id)
+    }
+    if (rows.length < PAGE) break
+  }
+  if (betaByEmail.size === 0) return []
+
+  // 2) Map against MAIN DB users to determine "signed up".
+  const db = createServiceClient()
+  const userByEmail = new Map<string, { id: string; suppressed: boolean }>()
+  const now = Date.now()
+  for (let page = 0; page < 60; page++) {
+    const { data, error } = await db.from('users').select('id, email, banned_until, unsubscribed_from_marketing').range(page * PAGE, page * PAGE + PAGE - 1)
+    if (error) break
+    const rows = (data ?? []) as unknown as { id: string; email: string | null; banned_until: string | null; unsubscribed_from_marketing: boolean | null }[]
+    for (const u of rows) {
+      if (!u.email) continue
+      const banned = !!(u.banned_until && new Date(u.banned_until).getTime() > now)
+      userByEmail.set(u.email.trim().toLowerCase(), { id: u.id, suppressed: banned || u.unsubscribed_from_marketing === true })
+    }
+    if (rows.length < PAGE) break
+  }
+
+  // 3) Build recipients. Signed-up users use their main-account unsubscribe; waitlist-only
+  //    recipients carry their beta_signups id so they get a beta unsubscribe link instead.
+  const recipients: Array<{ id: string | null; email: string; betaId?: string }> = []
+  for (const [email, betaId] of betaByEmail) {
+    const user = userByEmail.get(email)
+    if (status === 'signed' && !user) continue
+    if (status === 'unsigned' && user) continue
+    if (user) {
+      if (user.suppressed) continue
+      recipients.push({ id: user.id, email })
+    } else {
+      recipients.push({ id: null, email, betaId })
+    }
+  }
+  return dropSuppressed(db, recipients)
+}
+
 /** Send a one-off email to a single user (by id) from the Email Users page. */
 export async function sendSingleEmailAction(
   userId: string,
@@ -184,30 +247,37 @@ export async function sendBroadcastAction(
   const admin = await requireAdmin(2)
   const subject = assertString(subjectRaw, 'Subject', 200)
   const body = assertString(bodyRaw, 'Body', 20_000)
-  assertEnum(segment.type, ['all', 'tier', 'active', 'custom'] as const, 'Segment')
+  assertEnum(segment.type, ['all', 'tier', 'active', 'custom', 'beta'] as const, 'Segment')
 
   const recipients = await resolveRecipients(segment)
   if (recipients.length === 0) throw new Error('No recipients match this segment.')
 
   // Don't persist the full pasted address list on the campaign/audit rows — record the count.
   const storedSegment =
-    segment.type === 'custom' ? { type: 'custom', emailCount: recipients.length } : segment
+    segment.type === 'custom' ? { type: 'custom', emailCount: recipients.length }
+      : segment.type === 'beta' ? { type: 'beta', betaStatus: segment.betaStatus ?? 'all', recipientCount: recipients.length }
+        : segment
 
   const pillLabel = segment.type === 'custom' ? 'MESSAGE' : 'PRODUCT UPDATE'
+  const reasonLine = segment.type === 'beta'
+    ? "You're receiving this because you joined the Salty beta waitlist."
+    : undefined
   const messages = recipients.map(recipient => {
-    const rendered = renderBrandedEmail({
-      subject,
-      body,
-      pillLabel,
-      // Non-user addresses (e.g. a test inbox) have no id, so no personalized unsubscribe link.
-      unsubscribeUrl: recipient.id ? unsubscribeUrl(recipient.id) : undefined,
-    })
+    // Prefer the main-account unsubscribe. Waitlist-only recipients (no account) get a beta
+    // unsubscribe keyed by their beta_signups id. Bare custom addresses get neither.
+    const unsub = recipient.id ? unsubscribeUrl(recipient.id)
+      : recipient.betaId ? betaUnsubscribeUrl(recipient.betaId)
+        : undefined
+    const listUnsub = recipient.id ? oneClickUnsubscribeUrl(recipient.id)
+      : recipient.betaId ? betaOneClickUnsubscribeUrl(recipient.betaId)
+        : undefined
+    const rendered = renderBrandedEmail({ subject, body, pillLabel, unsubscribeUrl: unsub, reasonLine })
     return {
       to: recipient.email,
       subject: rendered.subject,
       html: rendered.html,
       text: rendered.text,
-      ...(recipient.id ? { listUnsubscribeUrl: oneClickUnsubscribeUrl(recipient.id) } : {}),
+      ...(listUnsub ? { listUnsubscribeUrl: listUnsub } : {}),
     }
   })
 

@@ -1,6 +1,5 @@
 'use client'
 
-import { useEffect, useState } from 'react'
 import {
   BarChart, Bar, AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
 } from 'recharts'
@@ -10,12 +9,15 @@ const dayTick = (v: string) => {
   return `${d.getMonth() + 1}/${d.getDate()}`
 }
 
-/** Daily signups bar chart. Mount-gated to avoid a recharts SSR hydration mismatch. */
-export function SignupsBarChart({ data }: { data: { day: string; count: number }[] }) {
-  const [mounted, setMounted] = useState(false)
-  useEffect(() => setMounted(true), [])
-  if (!mounted) return <div style={{ height: 240 }} />
+function Empty() {
+  return <div style={{ height: 240 }} className="flex items-center justify-center text-[13px] text-salty-muted">No data</div>
+}
 
+/** Daily/weekly bar chart of {day, count}. */
+export function SignupsBarChart({ data, label = 'Signups', color = '#E8581A' }: {
+  data: { day: string; count: number }[]; label?: string; color?: string
+}) {
+  if (!data || data.length === 0) return <Empty />
   return (
     <ResponsiveContainer width="100%" height={240}>
       <BarChart data={data} margin={{ top: 4, right: 4, left: -16, bottom: 0 }}>
@@ -25,38 +27,38 @@ export function SignupsBarChart({ data }: { data: { day: string; count: number }
         <Tooltip
           contentStyle={{ fontSize: 12 }}
           labelFormatter={(v: string) => new Date(v).toLocaleDateString()}
-          formatter={(v: number) => [v, 'Signups']}
+          formatter={(v: number) => [v, label]}
         />
-        <Bar dataKey="count" fill="#E8581A" radius={[4, 4, 0, 0]} isAnimationActive={false} />
+        <Bar dataKey="count" fill={color} radius={[4, 4, 0, 0]} isAnimationActive={false} />
       </BarChart>
     </ResponsiveContainer>
   )
 }
 
-/** Cumulative total signups over time. */
-export function CumulativeAreaChart({ data }: { data: { day: string; total: number }[] }) {
-  const [mounted, setMounted] = useState(false)
-  useEffect(() => setMounted(true), [])
-  if (!mounted) return <div style={{ height: 240 }} />
-
+/** Area chart of {day, total} (cumulative counts, or per-day money when `money`). */
+export function CumulativeAreaChart({ data, label = 'Total signups', color = '#C8A96E', money = false }: {
+  data: { day: string; total: number }[]; label?: string; color?: string; money?: boolean
+}) {
+  if (!data || data.length === 0) return <Empty />
+  const gradId = `grad-${label.replace(/\W+/g, '')}`
   return (
     <ResponsiveContainer width="100%" height={240}>
       <AreaChart data={data} margin={{ top: 4, right: 4, left: -16, bottom: 0 }}>
         <defs>
-          <linearGradient id="beta-cumulative" x1="0" y1="0" x2="0" y2="1">
-            <stop offset="0%" stopColor="#C8A96E" stopOpacity={0.5} />
-            <stop offset="100%" stopColor="#C8A96E" stopOpacity={0} />
+          <linearGradient id={gradId} x1="0" y1="0" x2="0" y2="1">
+            <stop offset="0%" stopColor={color} stopOpacity={0.5} />
+            <stop offset="100%" stopColor={color} stopOpacity={0} />
           </linearGradient>
         </defs>
         <CartesianGrid strokeDasharray="3 3" className="stroke-muted" />
         <XAxis dataKey="day" tick={{ fontSize: 11 }} tickLine={false} axisLine={false} minTickGap={24} tickFormatter={dayTick} />
-        <YAxis tick={{ fontSize: 11 }} tickLine={false} axisLine={false} allowDecimals={false} />
+        <YAxis tick={{ fontSize: 11 }} tickLine={false} axisLine={false} allowDecimals={false} width={money ? 52 : undefined} tickFormatter={money ? (v: number) => `$${v}` : undefined} />
         <Tooltip
           contentStyle={{ fontSize: 12 }}
           labelFormatter={(v: string) => new Date(v).toLocaleDateString()}
-          formatter={(v: number) => [v, 'Total signups']}
+          formatter={(v: number) => [money ? `$${v.toFixed(2)}` : v, label]}
         />
-        <Area type="monotone" dataKey="total" stroke="#C8A96E" strokeWidth={2} fill="url(#beta-cumulative)" isAnimationActive={false} />
+        <Area type="monotone" dataKey="total" stroke={color} strokeWidth={2} fill={`url(#${gradId})`} isAnimationActive={false} />
       </AreaChart>
     </ResponsiveContainer>
   )
