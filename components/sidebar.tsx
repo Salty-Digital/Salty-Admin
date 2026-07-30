@@ -6,7 +6,7 @@ import {
   LayoutDashboard, BarChart3, Users, Ticket, Mail,
   Calendar, Database, Send, Bell, Settings,
   ChevronRight, LogOut, Wifi, Activity, ShieldAlert, MessageSquare,
-  MailPlus, MailX, Sparkles, ScanLine, Music, Heart, Compass, Image as ImageIcon,
+  MailPlus, MailX, Sparkles, ScanLine, Music, Heart, Compass, Image as ImageIcon, Rocket,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { useAdmin } from './admin-provider'
@@ -39,8 +39,9 @@ const NAV_SECTIONS: NavSection[] = [
   {
     label: 'Overview',
     items: [
-      { href: '/',          label: 'Dashboard',  icon: LayoutDashboard, maxLevel: 4 },
-      { href: '/analytics', label: 'Analytics',  icon: BarChart3,       maxLevel: 3 },
+      { href: '/',             label: 'Dashboard',    icon: LayoutDashboard, maxLevel: 4 },
+      { href: '/analytics',    label: 'Analytics',    icon: BarChart3,       maxLevel: 3 },
+      { href: '/beta-signups', label: 'Beta Signups', icon: Rocket,          maxLevel: 3 },
     ],
   },
   {
