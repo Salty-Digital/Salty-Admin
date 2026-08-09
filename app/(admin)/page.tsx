@@ -3,6 +3,7 @@ import { requireAdmin } from '@/lib/auth'
 import { createServiceClient } from '@/lib/supabase/server'
 import { TicketActivityChart } from '@/components/charts/ticket-activity-chart'
 import { CategoryDonutChart } from '@/components/charts/category-donut-chart'
+import { CATEGORY_EMOJI } from '@/lib/categories'
 import {
   Users, Ticket, MailOpen, Import, Wifi,
   TrendingUp, TrendingDown,
@@ -74,7 +75,9 @@ async function getDashboardData() {
     const key = d.toLocaleString('en-US', { month: 'short' })
     if (!byMonth[key]) byMonth[key] = { tickets: 0, imports: 0 }
     byMonth[key].tickets++
-    if (t.source === 'gmail') byMonth[key].imports++
+    // "Imports" = auto-populated tickets (anything not hand-entered). Previously this
+    // only counted gmail, which badly undercounts now that calendar is the top source.
+    if (t.source !== 'manual') byMonth[key].imports++
   }
 
   const monthLabels: string[] = []
@@ -364,10 +367,7 @@ export default async function DashboardPage() {
               raw_data: { title?: string | null; venue?: string | null; category?: string; subject?: string }
               created_at: string
             }) => {
-              const catEmoji: Record<string, string> = {
-                concert: '🎵', sports: '🏀', theater: '🎭',
-                festival: '🎪', trip: '✈️', dining: '🍽️', other: '📋',
-              }
+              const catEmoji = CATEGORY_EMOJI
               const cat = imp.raw_data?.category ?? 'other'
               const conf = imp.confidence
               return (

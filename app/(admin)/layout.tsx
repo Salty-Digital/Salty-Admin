@@ -18,13 +18,11 @@ async function getLayoutCounts(accessLevel: number) {
     { count: users },
     { count: tickets },
     { count: pendingImports },
-    { count: unreadFeedback },
     { data: openConvos },
   ] = await Promise.all([
     db.from('users').select('*', { count: 'exact', head: true }),
     db.from('tickets').select('*', { count: 'exact', head: true }),
     db.from('pending_imports').select('*', { count: 'exact', head: true }).eq('status', 'pending'),
-    db.from('feedback').select('*', { count: 'exact', head: true }).eq('status', 'unread'),
     includeSupport
       ? db.from('support_conversations').select('id').eq('status', 'open')
       : Promise.resolve({ data: [] as { id: string }[] }),
@@ -46,7 +44,6 @@ async function getLayoutCounts(accessLevel: number) {
     users: users ?? 0,
     tickets: tickets ?? 0,
     pendingImports: pendingImports ?? 0,
-    unreadFeedback: unreadFeedback ?? 0,
     openSupportChats,
   }
 }
@@ -62,7 +59,7 @@ export default async function AdminLayout({ children }: { children: React.ReactN
       <div className="flex h-screen overflow-hidden">
         <Sidebar counts={counts} />
         <div className="flex flex-1 flex-col overflow-hidden" style={{ marginLeft: 220 }}>
-          <Header pendingImports={counts.pendingImports} unreadFeedback={counts.unreadFeedback} />
+          <Header pendingImports={counts.pendingImports} />
           <main className="flex-1 overflow-y-auto">
             {children}
           </main>

@@ -4,6 +4,7 @@ import { revalidatePath } from 'next/cache'
 import { requireAdmin, logAudit } from '@/lib/auth'
 import { createServiceClient } from '@/lib/supabase/server'
 import { assertUUID } from '@/lib/validate'
+import { isKnownCategory } from '@/lib/categories'
 
 export async function approveImportAction(importId: string) {
   const admin = await requireAdmin(2)
@@ -12,7 +13,7 @@ export async function approveImportAction(importId: string) {
 
   const { data: imp } = await db
     .from('pending_imports')
-    .select('id, user_id, raw_data, confidence, status')
+    .select('id, user_id, raw_data, confidence, status, source')
     .eq('id', iid)
     .single()
 
@@ -28,12 +29,11 @@ export async function approveImportAction(importId: string) {
     date_str:   typeof raw.date === 'string'  ? raw.date.slice(0, 50)   : null,
     time_str:   typeof raw.time === 'string'  ? raw.time.slice(0, 20)   : null,
     seat:       typeof raw.seat === 'string'  ? raw.seat.slice(0, 100)  : null,
-    category:   ['concert','sports','theater','dining','festival','trip','other'].includes(raw.category as string)
-                  ? raw.category : 'other',
+    category:   isKnownCategory(raw.category) ? raw.category : 'other',
     tint:       typeof raw.tint === 'string'  ? raw.tint : '#b0b8e0',
     image_url:  typeof raw.image_url === 'string' ? raw.image_url : '',
     confidence: imp.confidence,
-    source:     'gmail',
+    source:     typeof imp.source === 'string' && imp.source ? imp.source : 'gmail',
     status:     'active',
     is_past:    false,
   })
@@ -71,15 +71,13 @@ export async function bulkApproveAction(importIds: string[]) {
 
   const { data: imports } = await db
     .from('pending_imports')
-    .select('id, user_id, raw_data, confidence, status')
+    .select('id, user_id, raw_data, confidence, status, source')
     .in('id', ids)
     .eq('status', 'pending')
 
   if (!imports || imports.length === 0) throw new Error('No pending imports found.')
 
-  const VALID_CATEGORIES = ['concert','sports','theater','dining','festival','trip','other']
-
-  const tickets = (imports as Array<{ id: string; user_id: string; raw_data: Record<string, unknown>; confidence: number }>).map(imp => {
+  const tickets = (imports as Array<{ id: string; user_id: string; raw_data: Record<string, unknown>; confidence: number; source: string | null }>).map(imp => {
     const raw = imp.raw_data
     return {
       user_id:    assertUUID(imp.user_id, 'User ID'),
@@ -88,11 +86,11 @@ export async function bulkApproveAction(importIds: string[]) {
       date_str:   typeof raw.date === 'string'  ? raw.date.slice(0, 50)   : null,
       time_str:   typeof raw.time === 'string'  ? raw.time.slice(0, 20)   : null,
       seat:       typeof raw.seat === 'string'  ? raw.seat.slice(0, 100)  : null,
-      category:   VALID_CATEGORIES.includes(raw.category as string) ? raw.category : 'other',
+      category:   isKnownCategory(raw.category) ? raw.category : 'other',
       tint:       typeof raw.tint === 'string'  ? raw.tint : '#b0b8e0',
       image_url:  typeof raw.image_url === 'string' ? raw.image_url : '',
       confidence: imp.confidence,
-      source:     'gmail',
+      source:     typeof imp.source === 'string' && imp.source ? imp.source : 'gmail',
       status:     'active',
       is_past:    false,
     }

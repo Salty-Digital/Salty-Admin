@@ -2,12 +2,14 @@ import Link from 'next/link'
 import { requireAdmin } from '@/lib/auth'
 import { createServiceClient } from '@/lib/supabase/server'
 import { ActionFilter } from './action-filter'
+import { SortLink } from '@/components/ui/sortable'
 
 interface PageProps {
-  searchParams: Promise<{ page?: string; action?: string }>
+  searchParams: Promise<{ page?: string; action?: string; sort?: string; dir?: string }>
 }
 
 const PAGE_SIZE = 50
+const AUDIT_SORT_COLS: Record<string, string> = { action: 'action', target: 'target_type', time: 'created_at' }
 
 const ACTION_COLOR: Record<string, string> = {
   delete_user:             'bg-[#FDEDED] text-[#BF4A3A]',
@@ -28,15 +30,17 @@ const ACTION_COLOR: Record<string, string> = {
 
 export default async function AuditLogPage({ searchParams }: PageProps) {
   await requireAdmin(1)
-  const { page = '1', action: filterAction = '' } = await searchParams
+  const { page = '1', action: filterAction = '', sort = '', dir = '' } = await searchParams
   const pageNum = Math.max(1, parseInt(page))
   const offset  = (pageNum - 1) * PAGE_SIZE
+  const sortCol = AUDIT_SORT_COLS[sort] ?? 'created_at'
+  const ascending = AUDIT_SORT_COLS[sort] ? dir === 'asc' : false
   const db      = createServiceClient()
 
   let query = db
     .from('admin_audit_log')
     .select('id, admin_id, action, target_type, target_id, metadata, created_at', { count: 'exact' })
-    .order('created_at', { ascending: false })
+    .order(sortCol, { ascending })
     .range(offset, offset + PAGE_SIZE - 1)
 
   if (filterAction) query = query.eq('action', filterAction)
@@ -72,9 +76,11 @@ export default async function AuditLogPage({ searchParams }: PageProps) {
         <table className="w-full">
           <thead>
             <tr className="border-b border-salty-border bg-cream">
-              {['Admin','Action','Target','Details','Time'].map(h => (
-                <th key={h} className="px-4 py-3 text-left text-[11px] font-semibold uppercase tracking-[0.06em] text-salty-muted">{h}</th>
-              ))}
+              <th className="px-4 py-3 text-left text-[11px] font-semibold uppercase tracking-[0.06em] text-salty-muted">Admin</th>
+              <SortLink label="Action" sortKey="action" className="px-4 py-3 text-left text-[11px] font-semibold uppercase tracking-[0.06em] text-salty-muted" />
+              <SortLink label="Target" sortKey="target" className="px-4 py-3 text-left text-[11px] font-semibold uppercase tracking-[0.06em] text-salty-muted" />
+              <th className="px-4 py-3 text-left text-[11px] font-semibold uppercase tracking-[0.06em] text-salty-muted">Details</th>
+              <SortLink label="Time" sortKey="time" className="px-4 py-3 text-left text-[11px] font-semibold uppercase tracking-[0.06em] text-salty-muted" />
             </tr>
           </thead>
           <tbody>
@@ -117,10 +123,10 @@ export default async function AuditLogPage({ searchParams }: PageProps) {
           <span>Page {pageNum} of {totalPages}</span>
           <div className="flex gap-3">
             {pageNum > 1 && (
-              <Link href={`/settings/audit-log?action=${filterAction}&page=${pageNum - 1}`} className="hover:text-ember">← Previous</Link>
+              <Link href={`/settings/audit-log?action=${filterAction}&sort=${sort}&dir=${dir}&page=${pageNum - 1}`} className="hover:text-ember">← Previous</Link>
             )}
             {pageNum < totalPages && (
-              <Link href={`/settings/audit-log?action=${filterAction}&page=${pageNum + 1}`} className="hover:text-ember">Next →</Link>
+              <Link href={`/settings/audit-log?action=${filterAction}&sort=${sort}&dir=${dir}&page=${pageNum + 1}`} className="hover:text-ember">Next →</Link>
             )}
           </div>
         </div>

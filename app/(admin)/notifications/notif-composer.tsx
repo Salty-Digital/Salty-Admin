@@ -5,8 +5,8 @@ import { Loader2, Send, Radio } from 'lucide-react'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { sendToUserAction, broadcastAction } from './actions'
 import { useAccessLevel } from '@/components/admin-provider'
+import { TICKET_CATEGORIES, CATEGORY_LABELS } from '@/lib/categories'
 
-const CATEGORIES = ['concert','sports','theater','dining','festival','trip','other']
 const SCREENS = ['', 'tickets', 'friends', 'settings', 'feedback']
 
 function Alert({ type, msg }: { type: 'success' | 'error'; msg: string }) {
@@ -123,7 +123,7 @@ export function NotifComposer({ users }: { users: { id: string; email: string }[
               <label className={labelCls}>Filter — category (optional)</label>
               <select value={b_cat} onChange={e => setBCat(e.target.value)} className={inputCls}>
                 <option value="">All users</option>
-                {CATEGORIES.map(c => <option key={c} value={c}>Users with {c} tickets</option>)}
+                {TICKET_CATEGORIES.map(c => <option key={c} value={c}>Users with {CATEGORY_LABELS[c] ?? c} tickets</option>)}
               </select>
             </div>
             <div>

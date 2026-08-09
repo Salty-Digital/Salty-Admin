@@ -4,9 +4,10 @@ import Link from 'next/link'
 import { usePathname } from 'next/navigation'
 import {
   LayoutDashboard, BarChart3, Users, Ticket, Mail,
-  Calendar, Database, Send, Bell, Settings,
+  Database, Send, Bell, Settings,
   ChevronRight, LogOut, Wifi, Activity, ShieldAlert, MessageSquare,
   MailPlus, MailX, Sparkles, ScanLine, Music, Heart, Compass, Image as ImageIcon, Rocket, LineChart,
+  Smartphone, Gauge, Inbox, UserCheck, KeyRound, ToggleLeft,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { useAdmin } from './admin-provider'
@@ -39,8 +40,9 @@ const NAV_SECTIONS: NavSection[] = [
   {
     label: 'Overview',
     items: [
-      { href: '/',          label: 'Dashboard', icon: LayoutDashboard, maxLevel: 4 },
-      { href: '/analytics', label: 'Analytics', icon: BarChart3,       maxLevel: 3 },
+      { href: '/',                label: 'Dashboard',      icon: LayoutDashboard, maxLevel: 4 },
+      { href: '/analytics',       label: 'Analytics',      icon: BarChart3,       maxLevel: 3 },
+      { href: '/build-adoption',  label: 'Build Adoption', icon: Gauge,           maxLevel: 3 },
     ],
   },
   {
@@ -48,13 +50,14 @@ const NAV_SECTIONS: NavSection[] = [
     items: [
       { href: '/users',           label: 'Users',           icon: Users,    maxLevel: 4, countVariant: 'ember' },
       { href: '/users/active',    label: 'Active Users',    icon: Activity, maxLevel: 3 },
+      { href: '/users/engagement', label: 'Engagement',     icon: UserCheck, maxLevel: 3 },
       { href: '/tickets',         label: 'Tickets',         icon: Ticket,   maxLevel: 3, countVariant: 'gold' },
       { href: '/pending-imports',   label: 'Imports',          icon: Mail,     maxLevel: 2, countVariant: 'ember' },
       { href: '/gmail-connections', label: 'Email Connections', icon: Wifi,   maxLevel: 2 },
       { href: '/photo-scans',       label: 'Photo Scans',      icon: ScanLine, maxLevel: 3 },
       { href: '/enrichment',        label: 'Enrichment',       icon: Music,    maxLevel: 3 },
       { href: '/photos',            label: 'Photos',           icon: ImageIcon, maxLevel: 3 },
-      { href: '/feedback',          label: 'Feedback',         icon: Calendar, maxLevel: 3 },
+      { href: '/feedback',          label: 'Feedback',         icon: Inbox,    maxLevel: 3 },
       { href: '/notifications',     label: 'Notifications',    icon: Bell,     maxLevel: 3 },
       { href: '/support-chat',      label: 'Support Chat',     icon: MessageSquare, maxLevel: 3, countVariant: 'ember' },
     ],
@@ -79,6 +82,9 @@ const NAV_SECTIONS: NavSection[] = [
   {
     label: 'System',
     items: [
+      { href: '/release-gate',          label: 'Release Gate', icon: Smartphone, maxLevel: 1 },
+      { href: '/settings/config',       label: 'Config Status', icon: KeyRound, maxLevel: 1 },
+      { href: '/settings/feature-flags', label: 'Feature Flags', icon: ToggleLeft, maxLevel: 1 },
       { href: '/settings/admin-users',  label: 'Admin Users', icon: Settings, maxLevel: 1 },
       { href: '/settings/audit-log',    label: 'Audit Log',   icon: Database, maxLevel: 1 },
     ],

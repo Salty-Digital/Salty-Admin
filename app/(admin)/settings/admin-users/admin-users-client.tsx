@@ -7,6 +7,7 @@ import {
   setAdminPasswordAction,
 } from './actions'
 import { ACCESS_LEVEL_LABELS } from '@/types/admin'
+import { useSort, SortHeader } from '@/components/ui/sortable'
 import {
   Dialog, DialogContent, DialogDescription, DialogFooter,
   DialogHeader, DialogTitle, DialogTrigger,
@@ -41,6 +42,14 @@ export function AdminUsersClient({ rows, currentAdminId }: { rows: AdminRow[]; c
   const [level, setLevel] = useState(4)
   const [result, setResult] = useState<{ type: 'success'|'error'; msg: string }|null>(null)
   const [pending, startTransition] = useTransition()
+
+  const { sorted, sortState, requestSort } = useSort(rows, {
+    admin: (r) => (r.full_name ?? r.email).toLowerCase(),
+    level: (r) => r.access_level,
+    status: (r) => (r.is_active ? 1 : 0),
+    lastLogin: (r) => (r.last_login_at ? Date.parse(r.last_login_at) : null),
+    invitedBy: (r) => (r.invited_by_email ?? '').toLowerCase(),
+  })
 
   function invite() {
     if (!email || !fullName) return setResult({ type: 'error', msg: 'Email and name are required.' })
@@ -110,14 +119,17 @@ export function AdminUsersClient({ rows, currentAdminId }: { rows: AdminRow[]; c
       <div className="overflow-hidden rounded-[14px] border border-salty-border bg-warm-white">
         <table className="w-full">
           <thead>
-            <tr className="border-b border-salty-border bg-cream">
-              {['Admin','Access Level','Status','Last Login','Invited By','Actions'].map(h => (
-                <th key={h} className="px-4 py-3 text-left text-[11px] font-semibold uppercase tracking-[0.06em] text-salty-muted">{h}</th>
-              ))}
+            <tr className="border-b border-salty-border bg-cream text-left text-[11px] font-semibold uppercase tracking-[0.06em] text-salty-muted">
+              <SortHeader label="Admin" sortKey="admin" sortState={sortState} onSort={requestSort} className="px-4 py-3" />
+              <SortHeader label="Access Level" sortKey="level" sortState={sortState} onSort={requestSort} className="px-4 py-3" />
+              <SortHeader label="Status" sortKey="status" sortState={sortState} onSort={requestSort} className="px-4 py-3" />
+              <SortHeader label="Last Login" sortKey="lastLogin" sortState={sortState} onSort={requestSort} className="px-4 py-3" />
+              <SortHeader label="Invited By" sortKey="invitedBy" sortState={sortState} onSort={requestSort} className="px-4 py-3" />
+              <th className="px-4 py-3">Actions</th>
             </tr>
           </thead>
           <tbody>
-            {rows.map(row => (
+            {sorted.map(row => (
               <AdminUserRow key={row.id} row={row} isSelf={row.id === currentAdminId} />
             ))}
           </tbody>

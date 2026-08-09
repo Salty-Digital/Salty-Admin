@@ -3,6 +3,8 @@ import { requireAdmin } from '@/lib/auth'
 import { createServiceClient } from '@/lib/supabase/server'
 import { maskEmail } from '@/lib/privacy'
 import { RevokeButton } from './revoke-button'
+import { SortLink } from '@/components/ui/sortable'
+import { sortRows } from '@/lib/sort'
 import { ExternalLink } from 'lucide-react'
 
 interface ConnectionRow {
@@ -33,8 +35,13 @@ function StaleBadge({ lastSyncedAt }: { lastSyncedAt: string | null }) {
   )
 }
 
-export default async function GmailConnectionsPage() {
+interface PageProps {
+  searchParams: Promise<{ sort?: string; dir?: string }>
+}
+
+export default async function GmailConnectionsPage({ searchParams }: PageProps) {
   const admin = await requireAdmin(2)
+  const { sort = '', dir = '' } = await searchParams
   const db = createServiceClient()
   const showPii = admin.access_level <= 2
 
@@ -48,13 +55,27 @@ export default async function GmailConnectionsPage() {
   const connections: ConnectionRow[] = [
     ...(gmailConns ?? []).map(c => ({ ...c, provider: 'gmail' as const })),
     ...(imapConns ?? []),
-  ].sort((a, b) => new Date(b.connected_at ?? 0).getTime() - new Date(a.connected_at ?? 0).getTime())
+  ]
 
   const userIds = [...new Set(connections.map(c => c.user_id))]
   const { data: users } = userIds.length > 0
     ? await db.from('users').select('id, email, display_name').in('id', userIds)
     : { data: [] }
   const userMap = Object.fromEntries((users ?? []).map(u => [u.id, u]))
+
+  const sorted = sortRows(
+    connections,
+    {
+      user: (c) => (userMap[c.user_id]?.email ?? '').toLowerCase(),
+      provider: (c) => c.provider,
+      email: (c) => c.email.toLowerCase(),
+      connected: (c) => (c.connected_at ? Date.parse(c.connected_at) : null),
+      synced: (c) => (c.last_synced_at ? Date.parse(c.last_synced_at) : null),
+    },
+    sort,
+    dir,
+    (c) => (c.connected_at ? new Date(c.connected_at).getTime() : 0),
+  )
 
   const gmailCount = gmailConns?.length ?? 0
   const imapCount = imapConns?.length ?? 0
@@ -73,18 +94,21 @@ export default async function GmailConnectionsPage() {
           <table className="w-full">
             <thead>
               <tr className="border-b border-salty-border bg-cream">
-                {['User', 'Provider', 'Email Account', 'Connected', 'Last Synced', ''].map(h => (
-                  <th key={h} className="px-4 py-3 text-left text-[11px] font-semibold uppercase tracking-[0.06em] text-salty-muted">{h}</th>
-                ))}
+                <SortLink label="User" sortKey="user" className="px-4 py-3 text-left text-[11px] font-semibold uppercase tracking-[0.06em] text-salty-muted" />
+                <SortLink label="Provider" sortKey="provider" className="px-4 py-3 text-left text-[11px] font-semibold uppercase tracking-[0.06em] text-salty-muted" />
+                <SortLink label="Email Account" sortKey="email" className="px-4 py-3 text-left text-[11px] font-semibold uppercase tracking-[0.06em] text-salty-muted" />
+                <SortLink label="Connected" sortKey="connected" className="px-4 py-3 text-left text-[11px] font-semibold uppercase tracking-[0.06em] text-salty-muted" />
+                <SortLink label="Last Synced" sortKey="synced" className="px-4 py-3 text-left text-[11px] font-semibold uppercase tracking-[0.06em] text-salty-muted" />
+                <th className="px-4 py-3 text-left text-[11px] font-semibold uppercase tracking-[0.06em] text-salty-muted" />
               </tr>
             </thead>
             <tbody>
-              {connections.length === 0 ? (
+              {sorted.length === 0 ? (
                 <tr>
                   <td colSpan={6} className="px-4 py-10 text-center text-[13px] text-salty-muted">No email connections</td>
                 </tr>
               ) : (
-                connections.map(c => {
+                sorted.map(c => {
                   const user = userMap[c.user_id]
                   const userEmail = user?.email ?? '—'
                   const displayEmail = showPii ? userEmail : maskEmail(userEmail)

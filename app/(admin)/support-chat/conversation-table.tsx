@@ -1,6 +1,9 @@
+'use client'
+
 import Link from 'next/link'
 import { Badge } from '@/components/ui/badge'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
+import { useSort, SortHeader } from '@/components/ui/sortable'
 
 export interface ConversationRow {
   id: string
@@ -15,24 +18,30 @@ export interface ConversationRow {
 }
 
 export function ConversationTable({ rows }: { rows: ConversationRow[] }) {
+  const { sorted, sortState, requestSort } = useSort(rows, {
+    user: (r) => (r.userDisplayName ?? r.userEmail).toLowerCase(),
+    message: (r) => r.lastMessagePreview.toLowerCase(),
+    from: (r) => r.lastSenderType ?? '',
+    updated: (r) => (r.lastMessageAt ? Date.parse(r.lastMessageAt) : null),
+  })
   return (
     <Table>
       <TableHeader>
         <TableRow>
-          <TableHead>User</TableHead>
-          <TableHead>Last message</TableHead>
-          <TableHead>From</TableHead>
-          <TableHead>Updated</TableHead>
+          <SortHeader label="User" sortKey="user" sortState={sortState} onSort={requestSort} className="h-10 px-4 text-left align-middle font-medium text-muted-foreground" />
+          <SortHeader label="Last message" sortKey="message" sortState={sortState} onSort={requestSort} className="h-10 px-4 text-left align-middle font-medium text-muted-foreground" />
+          <SortHeader label="From" sortKey="from" sortState={sortState} onSort={requestSort} className="h-10 px-4 text-left align-middle font-medium text-muted-foreground" />
+          <SortHeader label="Updated" sortKey="updated" sortState={sortState} onSort={requestSort} className="h-10 px-4 text-left align-middle font-medium text-muted-foreground" />
           <TableHead className="w-16" />
         </TableRow>
       </TableHeader>
       <TableBody>
-        {rows.length === 0 ? (
+        {sorted.length === 0 ? (
           <TableRow>
             <TableCell colSpan={5} className="text-center text-muted-foreground py-8">No conversations</TableCell>
           </TableRow>
         ) : (
-          rows.map((r) => (
+          sorted.map((r) => (
             <TableRow key={r.id}>
               <TableCell className="font-medium">
                 <div className="flex items-center gap-2">

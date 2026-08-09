@@ -4,6 +4,8 @@ import { maskEmail } from '@/lib/privacy'
 import { createServiceClient } from '@/lib/supabase/server'
 import { createV2Client, isV2Configured, V2NotConfiguredError } from '@/lib/supabase/v2'
 import { SignupsBarChart, CumulativeAreaChart } from './charts'
+import { SortLink } from '@/components/ui/sortable'
+import { sortRows } from '@/lib/sort'
 import {
   Users, UserCheck, Send, UserX, TrendingUp, TrendingDown, Rocket, Share2, AlertTriangle, Check, Clock,
 } from 'lucide-react'
@@ -414,7 +416,7 @@ function LoadError({ message }: { message: string }) {
 
 // ─── Page ────────────────────────────────────────────────────────────────────
 
-export default async function BetaSignupsPage({ searchParams }: { searchParams: Promise<{ scope?: string; bucket?: string; status?: string }> }) {
+export default async function BetaSignupsPage({ searchParams }: { searchParams: Promise<{ scope?: string; bucket?: string; status?: string; sort?: string; dir?: string }> }) {
   const admin = await requireAdmin(3)
   if (!isV2Configured()) return <NotConfigured />
 
@@ -422,6 +424,8 @@ export default async function BetaSignupsPage({ searchParams }: { searchParams: 
   const scope: Scope = sp.scope === 'external' ? 'external' : 'all'
   const granularity: Granularity = sp.bucket === 'week' ? 'week' : 'day'
   const status: Status = sp.status === 'signed' ? 'signed' : sp.status === 'unsigned' ? 'unsigned' : 'all'
+  const sort = sp.sort ?? ''
+  const dir = sp.dir ?? ''
 
   let d: Awaited<ReturnType<typeof getBetaData>>
   try {
@@ -430,6 +434,20 @@ export default async function BetaSignupsPage({ searchParams }: { searchParams: 
     if (e instanceof V2NotConfiguredError) return <NotConfigured />
     return <LoadError message={(e as Error).message} />
   }
+
+  const list = sortRows(
+    d.list,
+    {
+      name: (r) => r.name.toLowerCase(),
+      email: (r) => (r.email ?? '').toLowerCase(),
+      status: (r) => (r.signedUp ? 1 : 0),
+      source: (r) => r.source ?? '',
+      when: (r) => (r.created_at ? Date.parse(r.created_at) : null),
+    },
+    sort,
+    dir,
+    (r) => (r.created_at ? new Date(r.created_at).getTime() : 0),
+  )
 
   const q = (s: Scope, b: Granularity, st: Status) => `/beta-signups?scope=${s}&bucket=${b}&status=${st}`
   const conversionPct = d.total > 0 ? Math.round((d.accountCreated / d.total) * 100) : 0
@@ -531,14 +549,18 @@ export default async function BetaSignupsPage({ searchParams }: { searchParams: 
           <table className="w-full">
             <thead>
               <tr className="border-b border-salty-border bg-cream">
-                {['Name', 'Email', 'Status', 'Source', 'When'].map(h => <th key={h} className="px-5 py-3 text-left text-[11px] font-semibold uppercase tracking-[0.06em] text-salty-muted">{h}</th>)}
+                <SortLink label="Name" sortKey="name" className="px-5 py-3 text-left text-[11px] font-semibold uppercase tracking-[0.06em] text-salty-muted" />
+                <SortLink label="Email" sortKey="email" className="px-5 py-3 text-left text-[11px] font-semibold uppercase tracking-[0.06em] text-salty-muted" />
+                <SortLink label="Status" sortKey="status" className="px-5 py-3 text-left text-[11px] font-semibold uppercase tracking-[0.06em] text-salty-muted" />
+                <SortLink label="Source" sortKey="source" className="px-5 py-3 text-left text-[11px] font-semibold uppercase tracking-[0.06em] text-salty-muted" />
+                <SortLink label="When" sortKey="when" className="px-5 py-3 text-left text-[11px] font-semibold uppercase tracking-[0.06em] text-salty-muted" />
               </tr>
             </thead>
             <tbody>
-              {d.list.length === 0 ? (
+              {list.length === 0 ? (
                 <tr><td colSpan={5} className="px-5 py-8 text-center text-[13px] text-salty-muted">No matching signups</td></tr>
               ) : (
-                d.list.map((r, i) => {
+                list.map((r, i) => {
                   const email = r.email ? (admin.access_level <= 2 ? r.email : maskEmail(r.email)) : '—'
                   return (
                     <tr key={i} className="border-b border-salty-border last:border-0 hover:bg-cream">

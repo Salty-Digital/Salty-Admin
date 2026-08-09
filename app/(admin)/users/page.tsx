@@ -6,10 +6,20 @@ import { maskEmail } from '@/lib/privacy'
 import { sanitizeOrFilterTerm } from '@/lib/validate'
 import { Badge } from '@/components/ui/badge'
 import { UserSearch } from './user-search'
+import { SortLink } from '@/components/ui/sortable'
 import { ExternalLink, Download } from 'lucide-react'
 
 interface PageProps {
-  searchParams: Promise<{ q?: string; zip?: string; tier?: string; page?: string }>
+  searchParams: Promise<{ q?: string; zip?: string; tier?: string; page?: string; sort?: string; dir?: string }>
+}
+
+// Server-sortable columns → real DB columns (derived columns like Tickets aren't here).
+const USER_SORT_COLS: Record<string, string> = {
+  user: 'email',
+  username: 'username',
+  tier: 'tier',
+  zip: 'zip_code',
+  joined: 'created_at',
 }
 
 const PAGE_SIZE = 50
@@ -31,16 +41,18 @@ function sourceBadge(src: 'team' | 'signup link' | 'external' | null) {
 
 export default async function UsersPage({ searchParams }: PageProps) {
   const admin = await requireAdmin()
-  const { q = '', zip = '', tier = '', page = '1' } = await searchParams
+  const { q = '', zip = '', tier = '', page = '1', sort = '', dir = '' } = await searchParams
   const pageNum = Math.max(1, parseInt(page))
   const offset  = (pageNum - 1) * PAGE_SIZE
+  const sortCol = USER_SORT_COLS[sort] ?? 'created_at'
+  const ascending = USER_SORT_COLS[sort] ? dir === 'asc' : false
 
   const db = createServiceClient()
 
   let query = db
     .from('users')
     .select('id, email, username, display_name, tier, zip_code, created_at, banned_until', { count: 'exact' })
-    .order('created_at', { ascending: false })
+    .order(sortCol, { ascending })
     .range(offset, offset + PAGE_SIZE - 1)
 
   if (q) {
@@ -114,9 +126,15 @@ export default async function UsersPage({ searchParams }: PageProps) {
           <table className="w-full">
             <thead>
               <tr className="border-b border-salty-border bg-cream">
-                {['User','Username','Tier','Source','Zip','Tickets','Connection','Joined',''].map(h => (
-                  <th key={h} className="px-4 py-3 text-left text-[11px] font-semibold uppercase tracking-[0.06em] text-salty-muted">{h}</th>
-                ))}
+                <SortLink label="User" sortKey="user" className="px-4 py-3 text-left text-[11px] font-semibold uppercase tracking-[0.06em] text-salty-muted" />
+                <SortLink label="Username" sortKey="username" className="px-4 py-3 text-left text-[11px] font-semibold uppercase tracking-[0.06em] text-salty-muted" />
+                <SortLink label="Tier" sortKey="tier" className="px-4 py-3 text-left text-[11px] font-semibold uppercase tracking-[0.06em] text-salty-muted" />
+                <th className="px-4 py-3 text-left text-[11px] font-semibold uppercase tracking-[0.06em] text-salty-muted">Source</th>
+                <SortLink label="Zip" sortKey="zip" className="px-4 py-3 text-left text-[11px] font-semibold uppercase tracking-[0.06em] text-salty-muted" />
+                <th className="px-4 py-3 text-left text-[11px] font-semibold uppercase tracking-[0.06em] text-salty-muted">Tickets</th>
+                <th className="px-4 py-3 text-left text-[11px] font-semibold uppercase tracking-[0.06em] text-salty-muted">Connection</th>
+                <SortLink label="Joined" sortKey="joined" className="px-4 py-3 text-left text-[11px] font-semibold uppercase tracking-[0.06em] text-salty-muted" />
+                <th className="px-4 py-3 text-left text-[11px] font-semibold uppercase tracking-[0.06em] text-salty-muted" />
               </tr>
             </thead>
             <tbody>
@@ -178,8 +196,8 @@ export default async function UsersPage({ searchParams }: PageProps) {
         <div className="flex items-center justify-between text-[13px] text-salty-muted">
           <span>Page {pageNum} of {totalPages}</span>
           <div className="flex gap-3">
-            {pageNum > 1 && <Link href={`/users?q=${q}&zip=${zip}&tier=${tier}&page=${pageNum-1}`} className="hover:text-ember">← Previous</Link>}
-            {pageNum < totalPages && <Link href={`/users?q=${q}&zip=${zip}&tier=${tier}&page=${pageNum+1}`} className="hover:text-ember">Next →</Link>}
+            {pageNum > 1 && <Link href={`/users?q=${q}&zip=${zip}&tier=${tier}&sort=${sort}&dir=${dir}&page=${pageNum-1}`} className="hover:text-ember">← Previous</Link>}
+            {pageNum < totalPages && <Link href={`/users?q=${q}&zip=${zip}&tier=${tier}&sort=${sort}&dir=${dir}&page=${pageNum+1}`} className="hover:text-ember">Next →</Link>}
           </div>
         </div>
       )}

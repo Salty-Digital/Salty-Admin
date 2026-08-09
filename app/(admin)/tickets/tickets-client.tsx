@@ -8,10 +8,10 @@ import { Badge } from '@/components/ui/badge'
 import { editTicketAction, deleteTicketAction } from './actions'
 import { useAccessLevel } from '@/components/admin-provider'
 import { formatPrice } from '@/lib/format'
+import { TICKET_CATEGORIES, TICKET_SOURCES, CATEGORY_LABELS } from '@/lib/categories'
+import { SortLink } from '@/components/ui/sortable'
 
-const CATEGORIES = ['concert','sports','theater','dining','festival','trip','other']
-const SOURCES    = ['gmail','calendar','wallet','manual','photo']
-const STATUSES   = ['active','archived','pending']
+const STATUSES = ['active', 'archived', 'pending']
 
 interface Ticket {
   id: string
@@ -63,11 +63,11 @@ function FilterBar({ filters }: { filters: Filters }) {
       />
       <select defaultValue={filters.category} onChange={(e) => set('category', e.target.value)} className={sel}>
         <option value="">All categories</option>
-        {CATEGORIES.map(c => <option key={c} value={c}>{c}</option>)}
+        {TICKET_CATEGORIES.map(c => <option key={c} value={c}>{CATEGORY_LABELS[c] ?? c}</option>)}
       </select>
       <select defaultValue={filters.source} onChange={(e) => set('source', e.target.value)} className={sel}>
         <option value="">All sources</option>
-        {SOURCES.map(s => <option key={s} value={s}>{s}</option>)}
+        {TICKET_SOURCES.map(s => <option key={s} value={s}>{s}</option>)}
       </select>
       <select defaultValue={filters.status} onChange={(e) => set('status', e.target.value)} className={sel}>
         <option value="">All statuses</option>
@@ -119,7 +119,7 @@ function TicketRow({ ticket, canEdit, canDelete }: { ticket: Ticket; canEdit: bo
         <td className="px-4 py-2"><input className={inp} value={fields.date_str} onChange={e => setFields(f => ({...f, date_str: e.target.value}))} placeholder="Date" /></td>
         <td className="px-4 py-2">
           <select className={inp} value={fields.category} onChange={e => setFields(f => ({...f, category: e.target.value}))}>
-            {CATEGORIES.map(c => <option key={c} value={c}>{c}</option>)}
+            {TICKET_CATEGORIES.map(c => <option key={c} value={c}>{CATEGORY_LABELS[c] ?? c}</option>)}
           </select>
         </td>
         <td className="px-4 py-2 text-[12px] text-salty-secondary">{ticket.source}</td>
@@ -212,9 +212,14 @@ export function TicketsClient({ tickets, filters }: { tickets: Ticket[]; filters
           <table className="w-full">
             <thead>
               <tr className="border-b border-salty-border bg-cream">
-                {['Title','Venue','Date','Category','Source','Price','User',''].map(h => (
-                  <th key={h} className="px-4 py-3 text-left text-[11px] font-semibold uppercase tracking-[0.06em] text-salty-muted">{h}</th>
-                ))}
+                <SortLink label="Title" sortKey="title" className="px-4 py-3 text-left text-[11px] font-semibold uppercase tracking-[0.06em] text-salty-muted" />
+                <SortLink label="Venue" sortKey="venue" className="px-4 py-3 text-left text-[11px] font-semibold uppercase tracking-[0.06em] text-salty-muted" />
+                <SortLink label="Date" sortKey="date" className="px-4 py-3 text-left text-[11px] font-semibold uppercase tracking-[0.06em] text-salty-muted" />
+                <SortLink label="Category" sortKey="category" className="px-4 py-3 text-left text-[11px] font-semibold uppercase tracking-[0.06em] text-salty-muted" />
+                <SortLink label="Source" sortKey="source" className="px-4 py-3 text-left text-[11px] font-semibold uppercase tracking-[0.06em] text-salty-muted" />
+                <SortLink label="Price" sortKey="price" className="px-4 py-3 text-left text-[11px] font-semibold uppercase tracking-[0.06em] text-salty-muted" />
+                <th className="px-4 py-3 text-left text-[11px] font-semibold uppercase tracking-[0.06em] text-salty-muted">User</th>
+                <th className="px-4 py-3 text-left text-[11px] font-semibold uppercase tracking-[0.06em] text-salty-muted" />
               </tr>
             </thead>
             <tbody>

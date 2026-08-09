@@ -8,6 +8,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@
 import { approveImportAction, rejectImportAction, bulkApproveAction, bulkRejectAction } from './actions'
 import { useAccessLevel } from '@/components/admin-provider'
 import { Check, X, CheckCheck, XCircle, Loader2, ImageIcon } from 'lucide-react'
+import { SortLink } from '@/components/ui/sortable'
 
 interface ImportRow {
   id: string
@@ -147,9 +148,9 @@ export function ImportsTable({ rows, showActions }: { rows: ImportRow[]; showAct
             <TableHead>Category</TableHead>
             <TableHead>Venue</TableHead>
             <TableHead>Date</TableHead>
-            <TableHead>Confidence</TableHead>
+            <SortLink label="Confidence" sortKey="confidence" className="h-10 px-4 text-left align-middle font-medium text-muted-foreground" />
             <TableHead>User</TableHead>
-            <TableHead>Submitted</TableHead>
+            <SortLink label="Submitted" sortKey="submitted" className="h-10 px-4 text-left align-middle font-medium text-muted-foreground" />
             {canAct && <TableHead className="w-20">Image</TableHead>}
             {canAct && <TableHead className="w-24" />}
           </TableRow>

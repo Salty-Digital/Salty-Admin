@@ -3,8 +3,7 @@
 import { requireAdmin, logAudit } from '@/lib/auth'
 import { createServiceClient } from '@/lib/supabase/server'
 import { assertUUID, assertString, assertEnum } from '@/lib/validate'
-
-const VALID_CATEGORIES = ['concert','sports','theater','dining','festival','trip','other'] as const
+import { TICKET_CATEGORIES } from '@/lib/categories'
 
 // Simple in-process broadcast rate limit: one broadcast per 5 minutes per process.
 // (Stateless/serverless — use Redis for multi-instance deployments.)
@@ -63,7 +62,7 @@ export async function broadcastAction(title: string, body: string, filterCategor
   const b = assertString(body, 'Body', 1000)
 
   if (filterCategory) {
-    assertEnum(filterCategory, VALID_CATEGORIES, 'Filter category')
+    assertEnum(filterCategory, TICKET_CATEGORIES, 'Filter category')
   }
 
   const db = createServiceClient()

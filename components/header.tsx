@@ -2,7 +2,7 @@
 
 import { usePathname, useRouter } from 'next/navigation'
 import { useEffect, useRef, useState } from 'react'
-import { Bell, RefreshCw, Search, Import, MessageSquare, CheckCircle } from 'lucide-react'
+import { Bell, RefreshCw, Search, Import, CheckCircle } from 'lucide-react'
 
 const TITLES: Record<string, string> = {
   '/':                        'Dashboard',
@@ -28,17 +28,37 @@ const TODAY = new Date().toLocaleDateString('en-US', { month: 'long', day: 'nume
 
 interface HeaderProps {
   pendingImports: number
-  unreadFeedback: number
 }
 
-export function Header({ pendingImports, unreadFeedback }: HeaderProps) {
+export function Header({ pendingImports }: HeaderProps) {
   const pathname = usePathname()
   const router = useRouter()
   const title = getTitle(pathname)
-  const total = pendingImports + unreadFeedback
+  const total = pendingImports
 
   const [open, setOpen] = useState(false)
+  const [seen, setSeen] = useState(0)
   const ref = useRef<HTMLDivElement>(null)
+
+  // Mark-as-seen: opening the bell dismisses the dot; it returns only when the count grows.
+  // The stored value is clamped down to the current total, so resolving items clears it too.
+  useEffect(() => {
+    const stored = Number(localStorage.getItem('notif_seen_total'))
+    setSeen(Math.min(Number.isFinite(stored) ? stored : 0, total))
+  }, [total])
+
+  const hasUnseen = total > seen
+
+  function toggleBell() {
+    setOpen(prev => {
+      const next = !prev
+      if (next) {
+        setSeen(total)
+        try { localStorage.setItem('notif_seen_total', String(total)) } catch { /* storage unavailable */ }
+      }
+      return next
+    })
+  }
 
   useEffect(() => {
     function handleClickOutside(e: MouseEvent) {
@@ -62,7 +82,7 @@ export function Header({ pendingImports, unreadFeedback }: HeaderProps) {
     >
       <div className="flex items-baseline gap-1.5">
         <h1 className="font-sora text-[18px] font-bold tracking-tight text-salty-text">{title}</h1>
-        <span className="text-[13px] text-salty-muted">· {TODAY}</span>
+        <span className="text-[13px] text-salty-muted" suppressHydrationWarning>· {TODAY}</span>
       </div>
 
       <div className="ml-auto flex items-center gap-3">
@@ -79,11 +99,11 @@ export function Header({ pendingImports, unreadFeedback }: HeaderProps) {
         {/* Bell */}
         <div ref={ref} className="relative">
           <button
-            onClick={() => setOpen(v => !v)}
+            onClick={toggleBell}
             className="relative flex h-[34px] w-[34px] items-center justify-center rounded-lg border border-salty-border bg-warm-white text-salty-secondary transition-colors hover:bg-cream"
           >
             <Bell className="h-4 w-4" />
-            {total > 0 && (
+            {hasUnseen && (
               <span className="absolute right-[7px] top-[7px] h-[7px] w-[7px] rounded-full border-2 border-white bg-ember" />
             )}
           </button>
@@ -112,20 +132,6 @@ export function Header({ pendingImports, unreadFeedback }: HeaderProps) {
                       <div>
                         <p className="text-[13px] font-medium text-salty-text">{pendingImports} pending import{pendingImports !== 1 ? 's' : ''}</p>
                         <p className="text-[11px] text-salty-muted">Waiting for review</p>
-                      </div>
-                    </button>
-                  )}
-                  {unreadFeedback > 0 && (
-                    <button
-                      onClick={() => navigate('/feedback')}
-                      className="flex w-full items-center gap-3 px-4 py-3 text-left transition-colors hover:bg-cream"
-                    >
-                      <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-[8px] bg-[#FFF8E6] text-[#C87A10]">
-                        <MessageSquare className="h-3.5 w-3.5" />
-                      </div>
-                      <div>
-                        <p className="text-[13px] font-medium text-salty-text">{unreadFeedback} unread feedback</p>
-                        <p className="text-[11px] text-salty-muted">Needs review</p>
                       </div>
                     </button>
                   )}

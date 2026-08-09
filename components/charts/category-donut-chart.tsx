@@ -2,21 +2,14 @@
 
 import { useEffect, useState } from 'react'
 import { PieChart, Pie, Cell, Tooltip } from 'recharts'
+import { CATEGORY_COLORS } from '@/lib/categories'
 
 interface DataPoint {
   name: string
   value: number
 }
 
-const COLORS: Record<string, string> = {
-  concert:  '#E8581A',
-  sports:   '#C8A96E',
-  festival: '#5A9E6F',
-  theater:  '#5A8FBF',
-  trip:     '#A8E6D3',
-  dining:   '#b0b8e0',
-  other:    '#EAE6DE',
-}
+const COLORS = CATEGORY_COLORS
 
 export function CategoryDonutChart({ data }: { data: DataPoint[] }) {
   // recharts renders raw SVG with internal ids/animation that don't match between the server

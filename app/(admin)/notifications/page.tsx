@@ -2,9 +2,11 @@ import Link from 'next/link'
 import { requireAdmin } from '@/lib/auth'
 import { createServiceClient } from '@/lib/supabase/server'
 import { NotifComposer } from './notif-composer'
+import { SortLink } from '@/components/ui/sortable'
+import { sortRows } from '@/lib/sort'
 
 interface PageProps {
-  searchParams: Promise<{ source?: string }>
+  searchParams: Promise<{ source?: string; sort?: string; dir?: string }>
 }
 
 const VALID_SOURCES = ['admin', 'system'] as const
@@ -21,7 +23,7 @@ const PREF_TOGGLES: [string, string][] = [
 
 export default async function NotificationsPage({ searchParams }: PageProps) {
   await requireAdmin(3)
-  const { source: sourceParam } = await searchParams
+  const { source: sourceParam, sort = '', dir = '' } = await searchParams
   const filter: SourceFilter = (VALID_SOURCES as readonly string[]).includes(sourceParam ?? '')
     ? (sourceParam as SourceFilter)
     : 'all'
@@ -74,6 +76,21 @@ export default async function NotificationsPage({ searchParams }: PageProps) {
     : { data: [] }
   const emailMap: Record<string, string> = {}
   for (const u of logUsers ?? []) emailMap[u.id] = u.email
+
+  const sortedLog = sortRows(
+    log ?? [],
+    {
+      title: (n) => (n.title ?? '').toLowerCase(),
+      body: (n) => (n.body ?? '').toLowerCase(),
+      user: (n) => (emailMap[n.user_id] ?? '').toLowerCase(),
+      source: (n) => n.source ?? 'system',
+      read: (n) => (n.read ? 1 : 0),
+      sent: (n) => (n.created_at ? Date.parse(n.created_at) : 0),
+    },
+    sort,
+    dir,
+    (n) => (n.created_at ? new Date(n.created_at).getTime() : 0),
+  )
 
   return (
     <div className="p-7 space-y-7">
@@ -150,9 +167,12 @@ export default async function NotificationsPage({ searchParams }: PageProps) {
           <table className="w-full">
             <thead>
               <tr className="border-b border-salty-border bg-cream">
-                {['Title','Body','User','Source','Read','Sent'].map(h => (
-                  <th key={h} className="px-4 py-3 text-left text-[11px] font-semibold uppercase tracking-[0.06em] text-salty-muted">{h}</th>
-                ))}
+                <SortLink label="Title" sortKey="title" className="px-4 py-3 text-left text-[11px] font-semibold uppercase tracking-[0.06em] text-salty-muted" />
+                <SortLink label="Body" sortKey="body" className="px-4 py-3 text-left text-[11px] font-semibold uppercase tracking-[0.06em] text-salty-muted" />
+                <SortLink label="User" sortKey="user" className="px-4 py-3 text-left text-[11px] font-semibold uppercase tracking-[0.06em] text-salty-muted" />
+                <SortLink label="Source" sortKey="source" className="px-4 py-3 text-left text-[11px] font-semibold uppercase tracking-[0.06em] text-salty-muted" />
+                <SortLink label="Read" sortKey="read" className="px-4 py-3 text-left text-[11px] font-semibold uppercase tracking-[0.06em] text-salty-muted" />
+                <SortLink label="Sent" sortKey="sent" className="px-4 py-3 text-left text-[11px] font-semibold uppercase tracking-[0.06em] text-salty-muted" />
               </tr>
             </thead>
             <tbody>
@@ -161,7 +181,7 @@ export default async function NotificationsPage({ searchParams }: PageProps) {
                   {filter === 'all' ? 'No notifications sent yet' : `No ${filter} notifications`}
                 </td></tr>
               ) : (
-                (log ?? []).map(n => (
+                sortedLog.map(n => (
                   <tr key={n.id} className="border-b border-salty-border last:border-0 hover:bg-cream">
                     <td className="px-4 py-3 text-[13px] font-medium text-salty-text">{n.title}</td>
                     <td className="px-4 py-3 text-[12px] text-salty-secondary max-w-xs"><p className="truncate">{n.body}</p></td>

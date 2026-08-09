@@ -12,14 +12,14 @@ const DAY = 86_400_000
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
-async function fetchAll<T>(db: DB, table: string, cols: string, since?: string): Promise<T[]> {
+async function fetchAll<T>(db: DB, table: string, cols: string, since?: string, orderCol = 'created_at'): Promise<T[]> {
   const PAGE = 1000
   const all: T[] = []
   for (let p = 0; p < 60; p++) {
     let query = db.from(table).select(cols)
-    if (since) query = query.gte('created_at', since)
-    const { data, error } = await query.order('created_at', { ascending: false }).range(p * PAGE, p * PAGE + PAGE - 1)
-    if (error) throw new Error(error.message)
+    if (since) query = query.gte(orderCol, since)
+    const { data, error } = await query.order(orderCol, { ascending: false }).range(p * PAGE, p * PAGE + PAGE - 1)
+    if (error) throw new Error(`${table}: ${error.message}`)
     const rows = (data ?? []) as unknown as T[]
     all.push(...rows)
     if (rows.length < PAGE) break
@@ -91,7 +91,7 @@ async function getMainAnalytics() {
     fetchAll<{ email: string | null; created_at: string | null; tier: string | null; last_seen_at: string | null; zip_code: string | null }>(
       db, 'users', 'email, created_at, tier, last_seen_at, zip_code'),
     fetchAll<{ source: string | null; category: string | null; imported_at: string | null }>(
-      db, 'tickets', 'source, category, imported_at'),
+      db, 'tickets', 'source, category, imported_at', undefined, 'imported_at'),
     fetchAll<{ external_api: string | null; model: string | null; success: boolean | null; latency_ms: number | null; created_at: string | null }>(
       db, 'api_usage_log', 'external_api, model, success, latency_ms, created_at', since30),
     fetchAll<{ recipient_count: number | null; sent_count: number | null; failed_count: number | null; created_at: string | null }>(
@@ -99,7 +99,7 @@ async function getMainAnalytics() {
     fetchAll<{ reason: string | null }>(db, 'email_suppressions', 'reason'),
     fetchAll<{ read: boolean | null; source: string | null; created_at: string | null }>(db, 'notifications', 'read, source, created_at'),
     fetchAll<{ user_id: string | null; created_at: string | null }>(db, 'saved_ai_questions', 'user_id, created_at'),
-  ]).catch(() => { throw new Error('query failed') })
+  ]).catch((e) => { throw new Error((e as Error)?.message ?? 'query failed') })
 
   // Users & growth
   const totalUsers = users.length

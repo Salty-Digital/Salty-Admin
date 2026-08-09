@@ -4,6 +4,7 @@ import { useState, useTransition } from 'react'
 import Link from 'next/link'
 import { Trash2, Loader2, ExternalLink } from 'lucide-react'
 import { deletePhotoAction } from './actions'
+import { useSort, SortHeader } from '@/components/ui/sortable'
 
 interface Photo {
   id: string
@@ -68,6 +69,14 @@ function DeleteCell({ photoId }: { photoId: string }) {
 }
 
 export function PhotoTable({ photos }: { photos: Photo[] }) {
+  const { sorted, sortState, requestSort } = useSort(photos, {
+    id: (p) => p.id,
+    user: (p) => p.user_email.toLowerCase(),
+    type: (p) => p.media_type,
+    match: (p) => p.match_confidence,
+    taken: (p) => (p.taken_at ? Date.parse(p.taken_at) : null),
+  })
+
   if (photos.length === 0) {
     return (
       <div className="overflow-hidden rounded-[14px] border border-salty-border bg-warm-white">
@@ -80,19 +89,17 @@ export function PhotoTable({ photos }: { photos: Photo[] }) {
     <div className="overflow-hidden rounded-[14px] border border-salty-border bg-warm-white">
       <table className="w-full">
         <thead>
-          <tr className="border-b border-salty-border bg-cream">
-            {['ID', 'User', 'Type', 'Match %', 'Taken', 'Actions'].map(h => (
-              <th
-                key={h}
-                className="px-4 py-3 text-left text-[11px] font-semibold uppercase tracking-[0.06em] text-salty-muted"
-              >
-                {h}
-              </th>
-            ))}
+          <tr className="border-b border-salty-border bg-cream text-left text-[11px] font-semibold uppercase tracking-[0.06em] text-salty-muted">
+            <SortHeader label="ID" sortKey="id" sortState={sortState} onSort={requestSort} className="px-4 py-3" />
+            <SortHeader label="User" sortKey="user" sortState={sortState} onSort={requestSort} className="px-4 py-3" />
+            <SortHeader label="Type" sortKey="type" sortState={sortState} onSort={requestSort} className="px-4 py-3" />
+            <SortHeader label="Match %" sortKey="match" sortState={sortState} onSort={requestSort} className="px-4 py-3" />
+            <SortHeader label="Taken" sortKey="taken" sortState={sortState} onSort={requestSort} className="px-4 py-3" />
+            <th className="px-4 py-3">Actions</th>
           </tr>
         </thead>
         <tbody>
-          {photos.map(p => (
+          {sorted.map(p => (
             <tr key={p.id} className="border-b border-salty-border last:border-0 hover:bg-cream">
               <td className="px-4 py-3 text-[12px] font-mono text-salty-secondary">{p.id.slice(0, 8)}</td>
               <td className="px-4 py-3 text-[12px] text-salty-secondary">
