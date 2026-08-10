@@ -3,7 +3,7 @@
 import { useState, useTransition } from 'react'
 import Link from 'next/link'
 import {
-  ArrowLeft, Sparkles, Loader2, Plus, X, Save, ExternalLink, Check,
+  ArrowLeft, Sparkles, Loader2, Plus, X, Save, ExternalLink, Check, AlertTriangle,
   Trophy, Music, Users as UsersIcon, Tag as TagIcon, StickyNote, Ticket as TicketIcon,
 } from 'lucide-react'
 import { TICKET_CATEGORIES, CATEGORY_LABELS } from '@/lib/categories'
@@ -11,6 +11,7 @@ import type { EventLookupResult } from '@/lib/anthropic'
 import {
   saveTicketCoreAction, addTagAction, removeTagAction, addNoteAction, removeNoteAction,
   saveCastAction, fetchCastAction, saveSetlistAction, saveSportsAction, fetchSportsAction, aiLookupAction,
+  verifyCategoryAction,
 } from './actions'
 import { QueueNav, type QueueNavData } from './queue-nav'
 
@@ -284,6 +285,19 @@ function CoreSection({ core, setField, ticketId }: { core: Core; setField: (k: k
     })
   }
 
+  const [checking, startCheck] = useTransition()
+  const [catCheck, setCatCheck] = useState<{ suggested: string; matches: boolean; confident: boolean; reason: string } | null>(null)
+  const [catErr, setCatErr] = useState<string | null>(null)
+
+  function verifyCategory() {
+    setCatErr(null); setCatCheck(null)
+    startCheck(async () => {
+      const res = await verifyCategoryAction({ title: core.title, venue: core.venue_name, date: core.date_str, category: core.category })
+      if (res.ok) setCatCheck({ suggested: res.suggested, matches: res.matches, confident: res.confident, reason: res.reason })
+      else setCatErr(res.error)
+    })
+  }
+
   return (
     <Section icon={TicketIcon} title="Event details">
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
@@ -311,6 +325,37 @@ function CoreSection({ core, setField, ticketId }: { core: Core; setField: (k: k
         <Field label="Est. price" value={core.est_price} onChange={setField('est_price')} placeholder="e.g. $80–$150" />
         <Field label="Rating (1–5)" value={core.rating} onChange={setField('rating')} type="number" placeholder="—" />
       </div>
+      <div className="mt-4 rounded-lg border border-salty-border bg-cream/40 px-4 py-3">
+        <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
+          <button
+            onClick={verifyCategory}
+            disabled={checking || !core.title.trim()}
+            className="inline-flex shrink-0 items-center gap-1.5 rounded-lg border border-[#E6D9F2] bg-[#FAF6FF] px-3 py-1.5 text-[12.5px] font-semibold text-[#7B44A8] transition-colors hover:bg-[#F3EBF8] disabled:opacity-50"
+          >
+            {checking ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Sparkles className="h-3.5 w-3.5" />}
+            Verify category with AI
+          </button>
+          {catErr && <span className="text-[12px] text-[#BF4A3A]">{catErr}</span>}
+          {catCheck && catCheck.matches && (
+            <span className="inline-flex items-center gap-1.5 text-[12.5px] text-[#3E8A5A]">
+              <Check className="h-4 w-4 shrink-0" /> Looks right — {CATEGORY_LABELS[catCheck.suggested] ?? catCheck.suggested}.{catCheck.reason ? ` ${catCheck.reason}` : ''}
+            </span>
+          )}
+          {catCheck && !catCheck.matches && (
+            <span className="inline-flex flex-wrap items-center gap-2 text-[12.5px] text-[#8A6830]">
+              <AlertTriangle className="h-4 w-4 shrink-0" />
+              <span>Should be <b>{CATEGORY_LABELS[catCheck.suggested] ?? catCheck.suggested}</b>{catCheck.confident ? '' : ' (low confidence)'}{catCheck.reason ? ` — ${catCheck.reason}` : ''}</span>
+              <button
+                onClick={() => { setField('category')(catCheck.suggested); setCatCheck({ ...catCheck, matches: true }) }}
+                className="shrink-0 rounded-md border border-salty-border bg-warm-white px-2 py-0.5 text-[11.5px] font-medium text-salty-secondary hover:bg-cream"
+              >
+                Apply — then Save
+              </button>
+            </span>
+          )}
+        </div>
+      </div>
+
       <div className="mt-4 flex items-center gap-3">
         <button onClick={save} disabled={pending} className="inline-flex items-center gap-1.5 rounded-lg bg-ember px-4 py-2 text-[13px] font-semibold text-white hover:bg-ember/90 disabled:opacity-60 transition-colors">
           {pending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />} Save details

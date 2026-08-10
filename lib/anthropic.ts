@@ -1,4 +1,4 @@
-import { TICKET_CATEGORIES } from './categories'
+import { TICKET_CATEGORIES, CATEGORY_LABELS } from './categories'
 
 // Salty's edge functions call Anthropic over raw fetch with a forced tool call (see
 // enrich-cast); the admin app has no SDK installed, so we mirror that proven pattern —
@@ -183,6 +183,83 @@ export async function aiEventLookup(
         sports,
       },
     }
+  } catch (e) {
+    return { ok: false, error: (e as Error).message }
+  }
+}
+
+// ── Category verification ──────────────────────────────────────────────────────────
+// Independently classifies a ticket so we can catch mislabels (e.g. a Rachael Ray taping
+// stored as "theater" when it's really "talk"). Cheaper/faster than a full event lookup.
+export interface CategoryAssessment {
+  category: string
+  confident: boolean
+  reason: string
+}
+
+const ASSESS_CATEGORY_TOOL = {
+  name: 'assess_category',
+  description: 'State the single best-fitting category for a live-event ticket.',
+  input_schema: {
+    type: 'object',
+    properties: {
+      category: { type: 'string', enum: [...TICKET_CATEGORIES], description: 'The single best-fitting category for this event.' },
+      confident: { type: 'boolean', description: 'True only if you can confidently tell what kind of event this is.' },
+      reason: { type: 'string', description: 'One short sentence: what the event actually is and why that category fits.' },
+    },
+    required: ['category', 'confident', 'reason'],
+  },
+} as const
+
+function buildCategoryPrompt(input: CategoryVerifyInput): string {
+  const parts = [`Event title: "${input.title}"`]
+  if (input.venue) parts.push(`Venue: "${input.venue}"`)
+  if (input.date) parts.push(`Date: "${input.date}"`)
+  const labels = TICKET_CATEGORIES.map((c) => `${c} (${CATEGORY_LABELS[c]})`).join(', ')
+  return [
+    'Classify this live-event ticket into exactly one category. Here is what is known:',
+    parts.join('\n'),
+    `Allowed categories: ${labels}.`,
+    'Judge from what the event ACTUALLY is, independent of any existing label or the venue name. Examples: a TV talk-show taping is "talk" even at a theatre; a circus, ice show, or family variety show ("Disney on Ice", "Sesame Street Live") is "other", not "theater"; a stand-up show is "comedy"; a play or musical is "theater".',
+    'Report via the assess_category tool. Set confident=false and choose "other" only if you truly cannot tell what the event is.',
+  ].join('\n')
+}
+
+export interface CategoryVerifyInput {
+  title: string
+  venue?: string | null
+  date?: string | null
+}
+
+export async function verifyTicketCategory(
+  input: CategoryVerifyInput,
+): Promise<{ ok: true; data: CategoryAssessment } | { ok: false; error: string }> {
+  const key = process.env.ANTHROPIC_API_KEY
+  if (!key) return { ok: false, error: 'ANTHROPIC_API_KEY is not set in the admin environment.' }
+  if (!input.title?.trim()) return { ok: false, error: 'A title is required to check the category.' }
+
+  try {
+    const res = await fetch(ANTHROPIC_URL, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', 'x-api-key': key, 'anthropic-version': '2023-06-01' },
+      body: JSON.stringify({
+        model: MODEL,
+        max_tokens: 300,
+        tools: [ASSESS_CATEGORY_TOOL],
+        tool_choice: { type: 'tool', name: 'assess_category' },
+        messages: [{ role: 'user', content: buildCategoryPrompt(input) }],
+      }),
+    })
+    if (!res.ok) {
+      const body = await res.text().catch(() => '')
+      return { ok: false, error: `AI category check failed (${res.status}). ${body.slice(0, 200)}` }
+    }
+    const json = (await res.json()) as { content?: { type: string; input?: Record<string, unknown> }[] }
+    const out = json.content?.find((b) => b.type === 'tool_use')?.input as Partial<CategoryAssessment> | undefined
+    if (!out) return { ok: false, error: 'The model returned no result. Try again.' }
+    const category = String(out.category ?? '').trim()
+    if (!(TICKET_CATEGORIES as readonly string[]).includes(category)) return { ok: false, error: 'The model returned an unknown category.' }
+    return { ok: true, data: { category, confident: !!out.confident, reason: String(out.reason ?? '').trim() } }
   } catch (e) {
     return { ok: false, error: (e as Error).message }
   }

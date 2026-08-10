@@ -5,7 +5,7 @@ import { requireAdmin, logAudit } from '@/lib/auth'
 import { createServiceClient, createEdgeFunctionClient } from '@/lib/supabase/server'
 import { assertUUID, assertString } from '@/lib/validate'
 import { TICKET_CATEGORIES } from '@/lib/categories'
-import { aiEventLookup, type EventLookupInput, type EventLookupResult } from '@/lib/anthropic'
+import { aiEventLookup, verifyTicketCategory, type EventLookupInput, type EventLookupResult, type CategoryVerifyInput } from '@/lib/anthropic'
 
 type Result = { ok: true } | { ok: false; error: string }
 
@@ -357,7 +357,11 @@ export async function fetchSportsAction(
 }
 
 // ── Review status — "mark done" in the queue (admin_ticket_reviews table) ─────────
-export async function markReviewedAction(ticketId: string, done: boolean): Promise<Result> {
+// `revalidate` is skipped by the editor's Done-&-next flow: it navigates to the next
+// ticket, and revalidating /manual-edit here would trigger a refresh of the current route
+// that races (and loses to) the navigation. The queue is force-dynamic, so it re-reads
+// reviews fresh on the next visit regardless.
+export async function markReviewedAction(ticketId: string, done: boolean, revalidate = true): Promise<Result> {
   try {
     const admin = await requireAdmin(2)
     const tid = assertUUID(ticketId, 'Ticket ID')
@@ -371,7 +375,7 @@ export async function markReviewedAction(ticketId: string, done: boolean): Promi
       const { error } = await db.from('admin_ticket_reviews').delete().eq('ticket_id', tid)
       if (error) return { ok: false, error: error.message }
     }
-    revalidatePath('/manual-edit')
+    if (revalidate) revalidatePath('/manual-edit')
     return { ok: true }
   } catch (e) {
     return { ok: false, error: (e as Error).message }
@@ -384,4 +388,15 @@ export async function aiLookupAction(
 ): Promise<{ ok: true; data: EventLookupResult } | { ok: false; error: string }> {
   await requireAdmin(2)
   return aiEventLookup(input)
+}
+
+// ── Category check — verifies the category and suggests the right one on a mismatch ──
+export async function verifyCategoryAction(
+  input: CategoryVerifyInput & { category?: string | null },
+): Promise<{ ok: true; suggested: string; matches: boolean; confident: boolean; reason: string } | { ok: false; error: string }> {
+  await requireAdmin(2)
+  const res = await verifyTicketCategory(input)
+  if (!res.ok) return res
+  const current = (input.category ?? '').trim()
+  return { ok: true, suggested: res.data.category, matches: res.data.category === current, confident: res.data.confident, reason: res.data.reason }
 }
