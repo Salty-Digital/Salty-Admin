@@ -6,6 +6,7 @@ import { CATEGORY_LABELS } from '@/lib/categories'
 import { ManualEditClient, type TicketFull } from './manual-edit-client'
 import { ManualEditFilters } from './manual-edit-filters'
 import { QueueCard } from './queue-card'
+import { BulkActions } from './bulk-actions'
 import { Search, SquarePen } from 'lucide-react'
 
 export const dynamic = 'force-dynamic'
@@ -72,7 +73,8 @@ export default async function ManualEditPage({ searchParams }: PageProps) {
         : pendingAll
   }
 
-  const rows = applyView(all, { flag, cat, sort, dir }).slice(0, 60)
+  const filtered = applyView(all, { flag, cat, sort, dir })
+  const rows = filtered.slice(0, 60)
   const emptyLabel = searching
     ? `No tickets match “${q}”.`
     : view === 'done'
@@ -166,6 +168,10 @@ export default async function ManualEditPage({ searchParams }: PageProps) {
               <>Showing <span className="font-semibold text-salty-text">{rows.length}</span> of <span className="font-semibold text-salty-text">{pendingCount}</span> pending — past events missing core fields, category, confidence, or admin-fetchable details (cast / result). Setlists fill automatically in-app and aren&apos;t listed.</>
             )}
           </p>
+
+          {view === 'pending' && filtered.length > 0 && (
+            <BulkActions rows={filtered.map((r) => ({ id: r.id, category: r.category, flags: r.flags }))} />
+          )}
         </>
       )}
 
@@ -276,6 +282,20 @@ async function toRows(db: ReturnType<typeof createServiceClient>, data: TicketPi
   })
 }
 
+// The ordered pending queue (default view) — lets the editor offer Prev / Next / Done-&-next
+// without bouncing back to the list. Mirrors the queue: flagged + past + not reviewed, sorted
+// by most issues first.
+async function loadPendingOrder(db: ReturnType<typeof createServiceClient>): Promise<string[]> {
+  const enrich = await loadEnrichment(db)
+  const { data: reviews } = await db.from('admin_ticket_reviews').select('ticket_id')
+  const reviewedSet = new Set((reviews ?? []).map((r) => r.ticket_id as string))
+  const { data: candData } = await db
+    .from('tickets').select(TICKET_COLS).or(CANDIDATE_OR).order('imported_at', { ascending: false }).limit(500)
+  const pendingAll = (await toRows(db, (candData ?? []) as TicketPick[], enrich))
+    .filter((r) => r.flags.length > 0 && r.isPast && !reviewedSet.has(r.id))
+  return applyView(pendingAll, { flag: '', cat: '', sort: 'flags', dir: 'desc' }).map((r) => r.id)
+}
+
 const FLAG_LABEL: Record<string, string> = {
   'no-title': 'No title', 'no-venue': 'No venue', 'no-date': 'No date',
   'uncategorised': 'Uncategorised', 'low-confidence': 'Low confidence', 'pending': 'Pending',
@@ -378,5 +398,16 @@ async function Editor({ ticketId }: { ticketId: string }) {
       : null,
   }
 
-  return <ManualEditClient ticket={full} />
+  // Position in the pending queue → drives Prev / Next / Done-&-next. If the current ticket
+  // isn't pending (already resolved or reviewed), offer the top of the queue as "next".
+  const order = await loadPendingOrder(db)
+  const idx = order.indexOf(ticketId)
+  const queueNav = {
+    total: order.length,
+    position: idx >= 0 ? idx + 1 : null,
+    prevId: idx > 0 ? order[idx - 1] : null,
+    nextId: idx >= 0 ? (idx < order.length - 1 ? order[idx + 1] : null) : (order[0] ?? null),
+  }
+
+  return <ManualEditClient ticket={full} queueNav={queueNav} />
 }

@@ -12,6 +12,7 @@ import {
   saveTicketCoreAction, addTagAction, removeTagAction, addNoteAction, removeNoteAction,
   saveCastAction, fetchCastAction, saveSetlistAction, saveSportsAction, fetchSportsAction, aiLookupAction,
 } from './actions'
+import { QueueNav, type QueueNavData } from './queue-nav'
 
 const STATUSES = ['active', 'archived', 'pending']
 
@@ -75,7 +76,7 @@ function Status({ state }: { state: { kind: 'idle' | 'saved' | 'error'; msg?: st
   return null
 }
 
-export function ManualEditClient({ ticket }: { ticket: TicketFull }) {
+export function ManualEditClient({ ticket, queueNav }: { ticket: TicketFull; queueNav?: QueueNavData }) {
   const [core, setCore] = useState<Core>(ticket.core)
   const [tags, setTags] = useState(ticket.tags)
   const [notes, setNotes] = useState(ticket.notes)
@@ -110,13 +111,16 @@ export function ManualEditClient({ ticket }: { ticket: TicketFull }) {
 
   return (
     <div className="p-7 space-y-5">
-      <div className="flex items-center justify-between">
+      <div className="flex flex-wrap items-center justify-between gap-3">
         <Link href="/manual-edit" className="inline-flex items-center gap-1.5 text-[13px] text-salty-muted hover:text-ember transition-colors">
           <ArrowLeft className="h-4 w-4" /> Back to search
         </Link>
-        <Link href={`/events/${ticket.id}`} className="inline-flex items-center gap-1.5 text-[13px] text-salty-muted hover:text-ember transition-colors">
-          View details <ExternalLink className="h-3.5 w-3.5" />
-        </Link>
+        <div className="flex flex-wrap items-center gap-3">
+          {queueNav && <QueueNav currentId={ticket.id} nav={queueNav} />}
+          <Link href={`/events/${ticket.id}`} className="inline-flex items-center gap-1.5 text-[13px] text-salty-muted hover:text-ember transition-colors">
+            View details <ExternalLink className="h-3.5 w-3.5" />
+          </Link>
+        </div>
       </div>
 
       <div>
