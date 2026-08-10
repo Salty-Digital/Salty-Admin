@@ -10,7 +10,7 @@ import { TICKET_CATEGORIES, CATEGORY_LABELS } from '@/lib/categories'
 import type { EventLookupResult } from '@/lib/anthropic'
 import {
   saveTicketCoreAction, addTagAction, removeTagAction, addNoteAction, removeNoteAction,
-  saveCastAction, saveSetlistAction, saveSportsAction, fetchSportsAction, aiLookupAction,
+  saveCastAction, fetchCastAction, saveSetlistAction, saveSportsAction, fetchSportsAction, aiLookupAction,
 } from './actions'
 
 const STATUSES = ['active', 'archived', 'pending']
@@ -87,6 +87,23 @@ export function ManualEditClient({ ticket }: { ticket: TicketFull }) {
   const setField = (k: keyof Core) => (v: string) => setCore((c) => ({ ...c, [k]: v }))
   const setSport = (k: keyof Sports) => (v: string) => setSports((s) => ({ ...s, [k]: v }))
 
+  // Notes and tags have no batch "save" — they persist on add. So AI-applied ones are
+  // written immediately (and reflected in local state) rather than staged in a form.
+  const addAiNote = async (text: string) => {
+    const t = text.trim()
+    if (!t) return
+    const res = await addNoteAction(ticket.id, t)
+    if (res.ok) setNotes((n) => [...n, { id: res.id, text: t, created_at: res.created_at }])
+  }
+  const addAiTags = async (labels: string[]) => {
+    for (const label of labels) {
+      const t = label.trim()
+      if (!t || tags.some((x) => x.tag_text.toLowerCase() === t.toLowerCase())) continue
+      const res = await addTagAction(ticket.id, t)
+      if (res.ok) setTags((prev) => [...prev, { id: res.id, tag_text: t }])
+    }
+  }
+
   const isTheater = core.category === 'theater'
   const isConcertish = ['concert', 'festival', 'edm'].includes(core.category)
   const isSports = core.category === 'sports'
@@ -110,7 +127,7 @@ export function ManualEditClient({ ticket }: { ticket: TicketFull }) {
         </p>
       </div>
 
-      <AiPanel ticket={ticket} core={core} setCore={setCore} setCast={setCast} setSports={setSports} appendNote={(t) => setNotes((n) => [...n, { id: `tmp-${Date.now()}`, text: t, created_at: new Date().toISOString() }])} />
+      <AiPanel ticket={ticket} core={core} setCore={setCore} setCast={setCast} setSports={setSports} addNote={addAiNote} addTags={addAiTags} />
 
       <CoreSection core={core} setField={setField} ticketId={ticket.id} />
 
@@ -131,14 +148,15 @@ export function ManualEditClient({ ticket }: { ticket: TicketFull }) {
 
 // ── AI lookup panel ─────────────────────────────────────────────────────────────
 function AiPanel({
-  ticket, core, setCore, setCast, setSports, appendNote,
+  ticket, core, setCore, setCast, setSports, addNote, addTags,
 }: {
   ticket: TicketFull
   core: Core
   setCore: React.Dispatch<React.SetStateAction<Core>>
   setCast: React.Dispatch<React.SetStateAction<{ name: string; role: string }[]>>
   setSports: React.Dispatch<React.SetStateAction<Sports>>
-  appendNote: (text: string) => void
+  addNote: (text: string) => void
+  addTags: (labels: string[]) => void
 }) {
   const [pending, start] = useTransition()
   const [result, setResult] = useState<EventLookupResult | null>(null)
@@ -167,12 +185,14 @@ function AiPanel({
       add('Category', CATEGORY_LABELS[result.category] ?? result.category, () => setCore((c) => ({ ...c, category: result.category })))
     }
     add('Est. price', result.price_estimate, () => setCore((c) => ({ ...c, est_price: result.price_estimate })))
-    add('Description → note', result.description, () => appendNote(result.description))
+    add('Description → note', result.description, () => addNote(result.description))
+    if (result.tags.length > 0) add('Tags', result.tags.join(', '), () => addTags(result.tags))
     if (result.sports) {
       const sp = result.sports
       const score = sp.away_score || sp.home_score ? ` ${sp.away_score || '–'}–${sp.home_score || '–'}` : ''
       const matchup = [sp.away_team, sp.home_team].filter(Boolean).join(' @ ')
-      add('Game result → sports', (matchup + score).trim(), () =>
+      const extras = [sp.sport, sp.league, sp.venue, sp.city, sp.season].filter(Boolean).join(' · ')
+      add('Game result → sports', [(matchup + score).trim(), extras].filter(Boolean).join('  —  '), () =>
         setSports((s) => ({
           ...s,
           home_team: sp.home_team || s.home_team,
@@ -181,6 +201,11 @@ function AiPanel({
           away_score: sp.away_score || s.away_score,
           league: sp.league || s.league,
           status: sp.status || s.status,
+          sport: sp.sport || s.sport,
+          venue: sp.venue || s.venue,
+          city: sp.city || s.city,
+          season: sp.season || s.season,
+          attendance: sp.attendance || s.attendance,
         })),
       )
     }
@@ -390,6 +415,8 @@ function NotesSection({ ticketId, notes, setNotes }: { ticketId: string; notes: 
 function CastSection({ ticketId, cast, setCast }: { ticketId: string; cast: { name: string; role: string }[]; setCast: React.Dispatch<React.SetStateAction<{ name: string; role: string }[]>> }) {
   const [pending, start] = useTransition()
   const [state, setState] = useState<{ kind: 'idle' | 'saved' | 'error'; msg?: string }>({ kind: 'idle' })
+  const [fetching, startFetch] = useTransition()
+  const [fetchMsg, setFetchMsg] = useState<string | null>(null)
   const setRow = (i: number, k: 'name' | 'role', v: string) => setCast((prev) => prev.map((r, idx) => (idx === i ? { ...r, [k]: v } : r)))
 
   function save() {
@@ -400,8 +427,21 @@ function CastSection({ ticketId, cast, setCast }: { ticketId: string; cast: { na
     })
   }
 
+  function fetchCast() {
+    setFetchMsg(null)
+    startFetch(async () => {
+      const res = await fetchCastAction(ticketId)
+      if (!res.ok) setFetchMsg(res.error)
+      else if (res.cast.length === 0) setFetchMsg('No cast found for this show (it may not be a play, or isn’t in Wikidata).')
+      else {
+        setCast(res.cast)
+        setFetchMsg(`Fetched ${res.cast.length} cast member${res.cast.length === 1 ? '' : 's'} from Wikidata + AI — already saved. Edit and Save to adjust.`)
+      }
+    })
+  }
+
   return (
-    <Section icon={UsersIcon} title="Cast" hint="theatre">
+    <Section icon={UsersIcon} title="Cast" hint="fetch from Wikidata + AI, or edit by hand">
       <div className="space-y-2">
         {cast.map((c, i) => (
           <div key={i} className="flex gap-2">
@@ -412,7 +452,10 @@ function CastSection({ ticketId, cast, setCast }: { ticketId: string; cast: { na
         ))}
         {cast.length === 0 && <p className="text-[12.5px] text-salty-muted">No cast yet.</p>}
       </div>
-      <div className="mt-3 flex items-center gap-3">
+      <div className="mt-3 flex flex-wrap items-center gap-3">
+        <button onClick={fetchCast} disabled={fetching} className="inline-flex items-center gap-1.5 rounded-lg border border-salty-border bg-cream px-3 py-2 text-[13px] font-medium text-salty-secondary hover:bg-stone disabled:opacity-60 transition-colors">
+          {fetching ? <Loader2 className="h-4 w-4 animate-spin" /> : <Sparkles className="h-4 w-4 text-ember" />} Fetch cast
+        </button>
         <button onClick={() => setCast((prev) => [...prev, { name: '', role: '' }])} className="inline-flex items-center gap-1 rounded-lg border border-salty-border bg-cream px-3 py-2 text-[13px] font-medium text-salty-secondary hover:bg-stone">
           <Plus className="h-4 w-4" /> Add person
         </button>
@@ -420,6 +463,7 @@ function CastSection({ ticketId, cast, setCast }: { ticketId: string; cast: { na
           {pending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />} Save cast
         </button>
         <Status state={state} />
+        {fetchMsg && <span className="text-[12px] text-salty-muted">{fetchMsg}</span>}
       </div>
     </Section>
   )
@@ -481,7 +525,7 @@ function SportsSection({ ticketId, sports, setSport, setSports }: { ticketId: st
     startFetch(async () => {
       const res = await fetchSportsAction(ticketId)
       if (!res.ok) setFetchMsg(res.error)
-      else if (!res.found) setFetchMsg('No exact result found for this matchup (needs a "Team A vs Team B" title and date).')
+      else if (!res.found) setFetchMsg('No game found. Double-check the date is the actual game day (the usual cause) and that the title names the team(s). Some tickets — stadium tours, off-season dates, amateur games — simply have no result to fetch.')
       else {
         setSports((s) => ({ ...s, ...res.sports! }))
         setFetchMsg('Fetched the exact result from sports data — it has been saved.')

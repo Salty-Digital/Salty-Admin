@@ -13,7 +13,6 @@ const FLAGS: [string, string][] = [
   ['low-confidence', 'Low confidence'],
   ['pending', 'Pending'],
   ['no-cast', 'No cast'],
-  ['no-setlist', 'No setlist'],
   ['no-result', 'No result'],
 ]
 

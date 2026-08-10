@@ -5,63 +5,93 @@ import { sanitizeOrFilterTerm } from '@/lib/validate'
 import { CATEGORY_LABELS } from '@/lib/categories'
 import { ManualEditClient, type TicketFull } from './manual-edit-client'
 import { ManualEditFilters } from './manual-edit-filters'
+import { QueueCard } from './queue-card'
 import { Search, SquarePen } from 'lucide-react'
 
 export const dynamic = 'force-dynamic'
 
 interface PageProps {
-  searchParams: Promise<{ ticket?: string; q?: string; flag?: string; cat?: string; sort?: string; dir?: string }>
+  searchParams: Promise<{ ticket?: string; q?: string; flag?: string; cat?: string; sort?: string; dir?: string; view?: string; bucket?: string }>
 }
 
 export default async function ManualEditPage({ searchParams }: PageProps) {
   await requireAdmin(2) // Super Admin + Admin only
-  const { ticket: ticketId, q = '', flag = '', cat = '', sort = 'flags', dir = 'desc' } = await searchParams
+  const { ticket: ticketId, q = '', flag = '', cat = '', sort = 'flags', dir = 'desc', view: viewParam = '', bucket = '' } = await searchParams
   const db = createServiceClient()
 
   if (ticketId) {
     return <Editor ticketId={ticketId} />
   }
 
-  // ── List view: default to an auto-populated queue of tickets that need edits;
-  //    the search box narrows to a specific ticket. Filtering + sorting run in memory
-  //    over the fetched candidates (both lists are capped). ──
+  // ── Queue view: auto-populated past events that need edits, split into Pending vs
+  //    Done (admin_ticket_reviews). Search narrows to a specific ticket. Filtering +
+  //    sorting run in memory over the fetched candidates. ──
   const searching = !!q.trim()
-  let all: ListRow[] = []
-  let needsReviewTotal = 0
-
-  // Enrichment presence (small tables) — lets us flag tickets missing event details
-  // (theatre cast, concert setlists, sports results), the same gap as the Broadway shows.
+  const view = viewParam === 'done' ? 'done' : 'pending'
   const enrich = await loadEnrichment(db)
 
+  // Which tickets an admin has marked "done".
+  const { data: reviews } = await db.from('admin_ticket_reviews').select('ticket_id')
+  const reviewedSet = new Set((reviews ?? []).map((r) => r.ticket_id as string))
+  const doneCount = reviewedSet.size
+
+  // Pending = flagged + past + not yet done. Always computed — it drives the count cards.
+  const { data: candData } = await db
+    .from('tickets').select(TICKET_COLS).or(CANDIDATE_OR).order('imported_at', { ascending: false }).limit(500)
+  const pendingAll = (await toRows(db, (candData ?? []) as TicketPick[], enrich))
+    .filter((r) => r.flags.length > 0 && r.isPast && !reviewedSet.has(r.id))
+  const pendingCount = pendingAll.length
+  const catCount = new Map<string, number>()
+  for (const r of pendingAll) catCount.set(r.category, (catCount.get(r.category) ?? 0) + 1)
+
+  // Split pending by data quality. "No proper data" = the import itself is unreliable or
+  // incomplete (missing a core field, low-confidence, or couldn't be categorised) — those
+  // usually can't be fixed by hand. The rest have solid data and just miss a detail
+  // (a category is fine; they're only flagged for missing enrichment: cast/setlist/result).
+  const isBroken = (r: ListRow) =>
+    r.flags.some((f) => f === 'No title' || f === 'No venue' || f === 'No date' || f === 'Uncategorised' || f === 'Low confidence')
+  const brokenCount = pendingAll.filter(isBroken).length
+  const missingCount = pendingCount - brokenCount
+
+  // The list to display for the current view.
+  let all: ListRow[]
   if (searching) {
     const safe = sanitizeOrFilterTerm(q)
     const { data } = await db
-      .from('tickets')
-      .select(TICKET_COLS)
-      .or(`title.ilike.%${safe}%,venue_name.ilike.%${safe}%`)
-      .order('imported_at', { ascending: false })
-      .limit(60)
+      .from('tickets').select(TICKET_COLS).or(`title.ilike.%${safe}%,venue_name.ilike.%${safe}%`).order('imported_at', { ascending: false }).limit(60)
+    all = await toRows(db, (data ?? []) as TicketPick[], enrich)
+  } else if (view === 'done') {
+    const ids = [...reviewedSet]
+    const { data } = ids.length
+      ? await db.from('tickets').select(TICKET_COLS).in('id', ids).order('imported_at', { ascending: false }).limit(500)
+      : { data: [] as TicketPick[] }
     all = await toRows(db, (data ?? []) as TicketPick[], enrich)
   } else {
-    // Candidates: core-field issues OR any enrichable-category ticket; enrichment gaps
-    // are then computed in memory and only flagged rows are kept.
-    const { data } = await db
-      .from('tickets')
-      .select(TICKET_COLS)
-      .or(CANDIDATE_OR)
-      .order('imported_at', { ascending: false })
-      .limit(500)
-    // Only past events (their date is strictly before today) — future and same-day are excluded.
-    all = (await toRows(db, (data ?? []) as TicketPick[], enrich)).filter((r) => r.flags.length > 0 && r.isPast)
-    needsReviewTotal = all.length
+    all = bucket === 'broken' ? pendingAll.filter(isBroken)
+        : bucket === 'missing' ? pendingAll.filter((r) => !isBroken(r))
+        : pendingAll
   }
 
   const rows = applyView(all, { flag, cat, sort, dir }).slice(0, 60)
   const emptyLabel = searching
     ? `No tickets match “${q}”.`
-    : flag || cat
-      ? 'No tickets match these filters.'
-      : 'Nothing needs manual review right now. 🎉'
+    : view === 'done'
+      ? 'No tickets marked done yet.'
+      : flag || cat
+        ? 'No tickets match these filters.'
+        : 'Nothing needs manual review right now. 🎉'
+
+  // Build a href that preserves the current filters/sort/view, with overrides.
+  const qhref = (over: Record<string, string | undefined>) => {
+    const merged: Record<string, string | undefined> = {
+      flag, cat, sort: sort === 'flags' ? undefined : sort, dir: dir === 'desc' ? undefined : dir,
+      view: view === 'pending' ? undefined : view, bucket: bucket || undefined, ...over,
+    }
+    const p = new URLSearchParams()
+    for (const [k, v] of Object.entries(merged)) if (v) p.set(k, v)
+    const s = p.toString()
+    return '/manual-edit' + (s ? `?${s}` : '')
+  }
 
   return (
     <div className="p-7 space-y-5">
@@ -99,10 +129,44 @@ export default async function ManualEditPage({ searchParams }: PageProps) {
       <ManualEditFilters flag={flag} cat={cat} sort={sort} dir={dir} searching={searching} />
 
       {!searching && (
-        <p className="text-[12.5px] text-salty-muted">
-          <span className="font-semibold text-salty-text">{needsReviewTotal.toLocaleString()}</span> past event{needsReviewTotal === 1 ? '' : 's'} need review — missing core fields, uncategorised, low-confidence, pending, or missing event details (cast / setlist / result). Future and same-day events are excluded.
-          {' '}Showing <span className="font-semibold text-salty-text">{rows.length}</span>.
-        </p>
+        <>
+          <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+            <StatCard label="Pending" value={pendingCount} href={qhref({ view: undefined, bucket: undefined, cat: undefined, flag: undefined })} active={view === 'pending' && !bucket} tone="ember" />
+            <StatCard label="Missing a detail" hint="good data · needs enrichment" value={missingCount} href={qhref({ view: undefined, bucket: bucket === 'missing' ? undefined : 'missing' })} active={view === 'pending' && bucket === 'missing'} tone="warn" />
+            <StatCard label="No proper data" hint="low-confidence / uncategorised" value={brokenCount} href={qhref({ view: undefined, bucket: bucket === 'broken' ? undefined : 'broken' })} active={view === 'pending' && bucket === 'broken'} tone="bad" />
+            <StatCard label="Done" value={doneCount} href={qhref({ view: 'done', bucket: undefined, cat: undefined, flag: undefined })} active={view === 'done'} tone="good" />
+          </div>
+
+          {view === 'pending' && catCount.size > 0 && (
+            <div className="flex flex-wrap gap-2">
+              {[...catCount.entries()].sort((a, b) => b[1] - a[1]).map(([c, n]) => {
+                const on = cat === c
+                return (
+                  <Link
+                    key={c}
+                    href={qhref({ cat: on ? undefined : c })}
+                    className={`inline-flex items-center gap-1.5 rounded-full border px-3 py-1 text-[12.5px] transition-colors ${on ? 'border-ember bg-ember-light text-ember' : 'border-salty-border bg-warm-white text-salty-secondary hover:bg-cream'}`}
+                  >
+                    {CATEGORY_LABELS[c] ?? c}
+                    <span className="font-bold">{n}</span>
+                  </Link>
+                )
+              })}
+            </div>
+          )}
+
+          <p className="text-[12.5px] text-salty-muted">
+            {view === 'done' ? (
+              <>Showing <span className="font-semibold text-salty-text">{rows.length}</span> ticket{rows.length === 1 ? '' : 's'} marked done.</>
+            ) : bucket === 'missing' ? (
+              <>Showing <span className="font-semibold text-salty-text">{rows.length}</span> of <span className="font-semibold text-salty-text">{missingCount}</span> with solid data — the event is right, it just needs a detail (cast / result) fetched.</>
+            ) : bucket === 'broken' ? (
+              <>Showing <span className="font-semibold text-salty-text">{rows.length}</span> of <span className="font-semibold text-salty-text">{brokenCount}</span> with no proper data — low-confidence, uncategorised, or missing core fields; these often can&apos;t be fixed by hand.</>
+            ) : (
+              <>Showing <span className="font-semibold text-salty-text">{rows.length}</span> of <span className="font-semibold text-salty-text">{pendingCount}</span> pending — past events missing core fields, category, confidence, or admin-fetchable details (cast / result). Setlists fill automatically in-app and aren&apos;t listed.</>
+            )}
+          </p>
+        </>
       )}
 
       {rows.length === 0 ? (
@@ -112,28 +176,7 @@ export default async function ManualEditPage({ searchParams }: PageProps) {
       ) : (
         <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
           {rows.map((t) => (
-            <Link
-              key={t.id}
-              href={`/manual-edit?ticket=${t.id}`}
-              className="flex items-start gap-3 rounded-[12px] border border-salty-border bg-warm-white px-4 py-3 transition-colors hover:border-salty-muted hover:bg-cream"
-            >
-              <div className="min-w-0 flex-1">
-                <p className="truncate text-[13px] font-medium text-salty-text">{t.title || 'Untitled'}</p>
-                <p className="truncate text-[11.5px] text-salty-muted">
-                  {[t.venue_name, t.date_str, t.email].filter(Boolean).join(' · ') || '—'}
-                </p>
-                {t.flags.length > 0 && (
-                  <div className="mt-1.5 flex flex-wrap gap-1">
-                    {t.flags.map((fl) => (
-                      <span key={fl} className={`rounded px-1.5 py-0.5 text-[10px] font-semibold ${toneCls(fl)}`}>{fl}</span>
-                    ))}
-                  </div>
-                )}
-              </div>
-              <span className="shrink-0 rounded-full bg-stone px-2.5 py-0.5 text-[11px] font-medium capitalize text-salty-secondary">
-                {CATEGORY_LABELS[t.category] ?? t.category}
-              </span>
-            </Link>
+            <QueueCard key={t.id} row={t} done={reviewedSet.has(t.id)} />
           ))}
         </div>
       )}
@@ -141,10 +184,27 @@ export default async function ManualEditPage({ searchParams }: PageProps) {
   )
 }
 
+function StatCard({ label, value, href, active, tone, hint }: { label: string; value: number; href: string; active: boolean; tone: 'ember' | 'good' | 'warn' | 'bad'; hint?: string }) {
+  const color = tone === 'good' ? 'text-[#3E8A5A]' : tone === 'warn' ? 'text-gold' : tone === 'bad' ? 'text-[#BF4A3A]' : 'text-ember'
+  return (
+    <Link
+      href={href}
+      className={`rounded-[14px] border bg-warm-white p-4 transition-colors ${active ? 'border-ember ring-2 ring-ember/20' : 'border-salty-border hover:border-salty-muted'}`}
+    >
+      <p className="text-[11px] font-semibold uppercase tracking-[0.06em] text-salty-muted">{label}</p>
+      <p className={`mt-1 font-sora text-[24px] font-bold ${color}`}>{value.toLocaleString()}</p>
+      {hint && <p className="text-[10.5px] text-salty-muted">{hint}</p>}
+    </Link>
+  )
+}
+
 // Conditions that mark a ticket as "needs manual editing". No user input → safe to inline.
 const NEEDS_EDIT_OR = 'title.is.null,venue_name.is.null,date_str.is.null,category.eq.other,status.eq.pending,confidence.lt.0.5'
-// Enrichable categories are also candidates — their event-details gaps are checked in memory.
-const ENRICHABLE = 'category.in.(theater,concert,festival,edm,sports)'
+// Only categories whose enrichment an admin can actually trigger from this page: theater
+// (Fetch cast) and sports (Fetch exact result). Concert/festival/edm setlists are omitted
+// on purpose — setlist-lookup needs the real signed-in user, so it can't be admin-triggered
+// and only fills in-app; flagging those here would just pad the queue with un-actionable rows.
+const ENRICHABLE = 'category.in.(theater,sports)'
 const CANDIDATE_OR = `${NEEDS_EDIT_OR},${ENRICHABLE}`
 const TICKET_COLS = 'id, title, venue_name, date_str, category, confidence, status, imported_at, user_id'
 
@@ -154,17 +214,16 @@ interface TicketPick {
   user_id: string
 }
 
-interface Enrich { cast: Set<string>; setlist: Set<string>; sports: Set<string> }
+interface Enrich { cast: Set<string>; sports: Set<string> }
 
 async function loadEnrichment(db: ReturnType<typeof createServiceClient>): Promise<Enrich> {
-  const [c, s, sp] = await Promise.all([
+  const [c, sp] = await Promise.all([
     db.from('ticket_cast').select('ticket_id'),
-    db.from('setlists').select('ticket_id'),
     db.from('sports_stats').select('ticket_id'),
   ])
   const ids = (rows: { ticket_id: string | null }[] | null) =>
     new Set((rows ?? []).map((r) => r.ticket_id).filter((x): x is string => !!x))
-  return { cast: ids(c.data), setlist: ids(s.data), sports: ids(sp.data) }
+  return { cast: ids(c.data), sports: ids(sp.data) }
 }
 interface ListRow {
   id: string; title: string | null; venue_name: string | null; date_str: string | null
@@ -192,25 +251,12 @@ function flagsFor(t: TicketPick, enrich: Enrich, isPast: boolean): string[] {
   if (t.category === 'other') f.push('Uncategorised')
   if (typeof t.confidence === 'number' && t.confidence < 0.5) f.push('Low confidence')
   if (t.status === 'pending') f.push('Pending')
-  // Missing event-details data (mirrors the app: cast for theatre, setlist/result only
-  // once the show/game is in the past).
+  // Missing event-details data that an admin can actually trigger from this page: cast for
+  // theatre, result once the game is past. (Setlists are intentionally not flagged — see
+  // ENRICHABLE: setlist-lookup can't be admin-triggered, so it would be un-actionable noise.)
   if (t.category === 'theater' && !enrich.cast.has(t.id)) f.push('No cast')
-  if (isPast && ['concert', 'festival', 'edm'].includes(t.category) && !enrich.setlist.has(t.id)) f.push('No setlist')
   if (isPast && t.category === 'sports' && !enrich.sports.has(t.id)) f.push('No result')
   return f
-}
-
-const FLAG_TONE: Record<string, 'red' | 'gold' | 'blue' | 'purple'> = {
-  'No title': 'red', 'No venue': 'red', 'No date': 'red',
-  'Uncategorised': 'gold', 'Low confidence': 'gold', 'Pending': 'blue',
-  'No cast': 'purple', 'No setlist': 'purple', 'No result': 'purple',
-}
-function toneCls(flag: string): string {
-  const tone = FLAG_TONE[flag] ?? 'gold'
-  if (tone === 'red') return 'bg-[#FDEDED] text-[#BF4A3A]'
-  if (tone === 'blue') return 'bg-[#EBF2FA] text-[#3A72A8]'
-  if (tone === 'purple') return 'bg-[#F3EBF8] text-[#7B44A8]'
-  return 'bg-gold-light text-gold'
 }
 
 async function toRows(db: ReturnType<typeof createServiceClient>, data: TicketPick[], enrich: Enrich): Promise<ListRow[]> {
@@ -233,7 +279,7 @@ async function toRows(db: ReturnType<typeof createServiceClient>, data: TicketPi
 const FLAG_LABEL: Record<string, string> = {
   'no-title': 'No title', 'no-venue': 'No venue', 'no-date': 'No date',
   'uncategorised': 'Uncategorised', 'low-confidence': 'Low confidence', 'pending': 'Pending',
-  'no-cast': 'No cast', 'no-setlist': 'No setlist', 'no-result': 'No result',
+  'no-cast': 'No cast', 'no-result': 'No result',
 }
 
 /** In-memory filter + sort over the fetched candidates (driven by URL params). */

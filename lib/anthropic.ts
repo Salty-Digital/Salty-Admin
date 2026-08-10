@@ -28,10 +28,12 @@ export interface EventLookupResult {
   category: string
   price_estimate: string
   description: string
+  tags: string[]
   notable_people: { name: string; role: string }[]
   sports: {
     home_team: string; away_team: string; home_score: string; away_score: string
     league: string; status: string
+    sport: string; venue: string; city: string; season: string; attendance: string
   } | null
 }
 
@@ -53,6 +55,11 @@ const REPORT_EVENT_TOOL = {
       category: { type: 'string', enum: [...TICKET_CATEGORIES] },
       price_estimate: { type: 'string', description: 'Rough typical ticket price range, e.g. "$80–$150".' },
       description: { type: 'string', description: 'One concise sentence describing the event.' },
+      tags: {
+        type: 'array',
+        description: 'A few short, factual labels for this event — league/competition, tour, genre, rivalry, milestone (e.g. "MLB", "Subway Series", "Eras Tour"). 2–5 max. Not personal or speculative.',
+        items: { type: 'string' },
+      },
       notable_people: {
         type: 'array',
         description: 'Theatre cast/creatives or concert opening acts (name + role). Empty otherwise.',
@@ -64,14 +71,19 @@ const REPORT_EVENT_TOOL = {
       },
       sports: {
         type: 'object',
-        description: 'For a sports GAME, the matchup and final result. Omit for non-game sports tickets (stadium tours, experiences).',
+        description: 'For a sports GAME, the matchup and full context. Omit for non-game sports tickets (stadium tours, experiences).',
         properties: {
           home_team: { type: 'string' },
           away_team: { type: 'string' },
           home_score: { type: 'integer' },
           away_score: { type: 'integer' },
-          league: { type: 'string' },
+          league: { type: 'string', description: 'e.g. "MLB", "NBA".' },
           status: { type: 'string', description: 'e.g. "Final".' },
+          sport: { type: 'string', description: 'e.g. "Baseball", "Basketball".' },
+          venue: { type: 'string' },
+          city: { type: 'string' },
+          season: { type: 'string', description: 'e.g. "2019".' },
+          attendance: { type: 'integer' },
         },
       },
     },
@@ -88,8 +100,8 @@ function buildPrompt(input: EventLookupInput): string {
     'An admin is correcting and completing the details of a live-event ticket. Here is what is known:',
     parts.join('\n'),
     'Report your best knowledge of THIS specific event via the report_event tool.',
-    'If this is a sports game, fill the `sports` object with the two teams and the final score if you know them. Omit it for non-game sports tickets like stadium tours or experiences.',
-    'Only fill a field when you are reasonably confident it is correct for this event. Use empty strings / an empty array for anything you do not know, and set known=false if you cannot identify the event at all. Never invent specifics.',
+    'Fill EVERY field you can for this event, not just the title — time, a rough price range, a one-line description, and 2–5 factual tags. For a sports game, fill the `sports` object as fully as you can: both teams, the final score, sport, league, venue, city, season, and attendance if known (omit `sports` for non-game tickets like stadium tours).',
+    'Only fill a field when you are reasonably confident it is correct for this event. Use empty strings / an empty array for anything you do not know, and set known=false if you cannot identify the event at all. Never invent specifics — in particular, do not guess exact scores or attendance you are unsure of.',
   ].join('\n')
 }
 
@@ -143,8 +155,16 @@ export async function aiEventLookup(
             away_score: str(sp.away_score),
             league: str(sp.league),
             status: str(sp.status),
+            sport: str(sp.sport),
+            venue: str(sp.venue),
+            city: str(sp.city),
+            season: str(sp.season),
+            attendance: str(sp.attendance),
           }
         : null
+    const tags = Array.isArray(p.tags)
+      ? [...new Set(p.tags.map((t) => str(t)).filter(Boolean))].slice(0, 8)
+      : []
     return {
       ok: true,
       data: {
@@ -158,6 +178,7 @@ export async function aiEventLookup(
         category: String(p.category ?? '').trim(),
         price_estimate: String(p.price_estimate ?? '').trim(),
         description: String(p.description ?? '').trim(),
+        tags,
         notable_people: people,
         sports,
       },

@@ -195,6 +195,41 @@ export async function saveCastAction(
   }
 }
 
+// ── Cast lookup — Wikidata + AI via the enrich-cast edge function ────────────────
+// The mirror of fetchSportsAction for theatre. enrich-cast grounds on Wikidata + Claude
+// and upserts ticket_cast (source:'ai') itself, so a returned result is already saved;
+// the form just fills with it for review. Needs the service_role JWT (see fetchSports).
+export async function fetchCastAction(
+  ticketId: string,
+): Promise<{ ok: true; cast: { name: string; role: string }[] } | { ok: false; error: string }> {
+  try {
+    await requireAdmin(2)
+    const tid = assertUUID(ticketId, 'Ticket ID')
+    const db = createServiceClient()
+    const { data: ticket } = await db.from('tickets').select('id, title, date_str, venue_name').eq('id', tid).single()
+    if (!ticket?.title) return { ok: false, error: 'Ticket not found.' }
+
+    const fn = createEdgeFunctionClient()
+    if (!fn) return { ok: false, error: 'SUPABASE_SERVICE_ROLE_JWT is not set in the admin environment.' }
+
+    const { data, error } = await fn.functions.invoke('enrich-cast', {
+      body: { ticketId: tid, title: ticket.title, date: ticket.date_str ?? undefined, venue: ticket.venue_name ?? undefined },
+    })
+    if (error) return { ok: false, error: error.message ?? 'Enrichment failed' }
+
+    const raw = (data as { cast?: { name?: unknown; role?: unknown }[] } | null)?.cast
+    const cast = Array.isArray(raw)
+      ? raw
+          .map((c) => ({ name: String(c.name ?? '').trim(), role: typeof c.role === 'string' ? c.role.trim() : '' }))
+          .filter((c) => c.name)
+      : []
+    revalidatePath(`/events/${tid}`)
+    return { ok: true, cast }
+  } catch (e) {
+    return { ok: false, error: (e as Error).message }
+  }
+}
+
 // ── Setlist (headliner) — replace the position-0 / artist-null row ───────────────
 export async function saveSetlistAction(
   ticketId: string,
@@ -316,6 +351,28 @@ export async function fetchSportsAction(
         venue: str(s.venue), city: str(s.city), season: str(s.season), attendance: str(s.attendance),
       },
     }
+  } catch (e) {
+    return { ok: false, error: (e as Error).message }
+  }
+}
+
+// ── Review status — "mark done" in the queue (admin_ticket_reviews table) ─────────
+export async function markReviewedAction(ticketId: string, done: boolean): Promise<Result> {
+  try {
+    const admin = await requireAdmin(2)
+    const tid = assertUUID(ticketId, 'Ticket ID')
+    const db = createServiceClient()
+    if (done) {
+      const { error } = await db
+        .from('admin_ticket_reviews')
+        .upsert({ ticket_id: tid, reviewed_by: admin.id, reviewed_at: new Date().toISOString() }, { onConflict: 'ticket_id' })
+      if (error) return { ok: false, error: error.message }
+    } else {
+      const { error } = await db.from('admin_ticket_reviews').delete().eq('ticket_id', tid)
+      if (error) return { ok: false, error: error.message }
+    }
+    revalidatePath('/manual-edit')
+    return { ok: true }
   } catch (e) {
     return { ok: false, error: (e as Error).message }
   }
