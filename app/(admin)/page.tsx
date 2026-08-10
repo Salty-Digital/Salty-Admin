@@ -4,10 +4,11 @@ import { createServiceClient } from '@/lib/supabase/server'
 import { TicketActivityChart } from '@/components/charts/ticket-activity-chart'
 import { CategoryDonutChart } from '@/components/charts/category-donut-chart'
 import { CATEGORY_EMOJI } from '@/lib/categories'
+import { ClickableRow } from '@/components/ui/clickable-row'
 import {
   Users, Ticket, MailOpen, Import, Wifi,
   TrendingUp, TrendingDown,
-  UserPlus, AlertTriangle, ShieldAlert, Settings,
+  UserPlus, AlertTriangle, ShieldAlert, Settings, ChevronRight,
 } from 'lucide-react'
 
 // ─── Data helpers ──────────────────────────────────────────────────────────────
@@ -323,7 +324,7 @@ export default async function DashboardPage() {
                 const bgColors = ['#FBEAF0','#FDF0EA','#EBF2FA','#FBF6ED','#EAF4EE','#F3EBF8']
                 const txtColors= ['#993356','#E8581A','#3A72A8','#8A6830','#3E8A5A','#7B44A8']
                 return (
-                  <tr key={u.id} className="border-b border-salty-border transition-colors last:border-0 hover:bg-cream cursor-pointer">
+                  <ClickableRow key={u.id} href={`/users/${u.id}`} ariaLabel={`View ${u.email} profile`} className="group border-b border-salty-border transition-colors last:border-0 hover:bg-cream">
                     <td className="px-5 py-3">
                       <div className="flex items-center gap-2.5">
                         <div
@@ -338,12 +339,10 @@ export default async function DashboardPage() {
                     <td className="px-5 py-3 text-[13px] text-salty-secondary">
                       {new Date(u.created_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}
                     </td>
-                    <td className="px-5 py-3">
-                      <Link href={`/users/${u.id}`} className="text-[12px] font-medium text-ember hover:underline">
-                        Manage
-                      </Link>
+                    <td className="px-5 py-3 text-right">
+                      <ChevronRight className="ml-auto h-4 w-4 text-salty-muted transition-colors group-hover:text-ember" />
                     </td>
-                  </tr>
+                  </ClickableRow>
                 )
               })}
             </tbody>

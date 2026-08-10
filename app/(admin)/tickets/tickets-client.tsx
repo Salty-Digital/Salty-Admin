@@ -3,13 +3,14 @@
 import { useState, useTransition } from 'react'
 import Link from 'next/link'
 import { useRouter, usePathname } from 'next/navigation'
-import { Pencil, Trash2, Check, X, Loader2, ExternalLink } from 'lucide-react'
+import { Pencil, Trash2, Check, X, Loader2, ExternalLink, ChevronRight } from 'lucide-react'
 import { Badge } from '@/components/ui/badge'
 import { editTicketAction, deleteTicketAction } from './actions'
 import { useAccessLevel } from '@/components/admin-provider'
 import { formatPrice } from '@/lib/format'
 import { TICKET_CATEGORIES, TICKET_SOURCES, CATEGORY_LABELS } from '@/lib/categories'
 import { SortLink } from '@/components/ui/sortable'
+import { ClickableRow } from '@/components/ui/clickable-row'
 
 const STATUSES = ['active', 'archived', 'pending']
 
@@ -77,7 +78,7 @@ function FilterBar({ filters }: { filters: Filters }) {
   )
 }
 
-function TicketRow({ ticket, canEdit, canDelete }: { ticket: Ticket; canEdit: boolean; canDelete: boolean }) {
+function TicketRow({ ticket, canEdit, canDelete, canView }: { ticket: Ticket; canEdit: boolean; canDelete: boolean; canView: boolean }) {
   const [editing, setEditing] = useState(false)
   const [deleting, setDeleting] = useState(false)
   const [pending, startTransition] = useTransition()
@@ -155,8 +156,8 @@ function TicketRow({ ticket, canEdit, canDelete }: { ticket: Ticket; canEdit: bo
     )
   }
 
-  return (
-    <tr className="border-b border-salty-border transition-colors hover:bg-cream cursor-default">
+  const cells = (
+    <>
       <td className="px-4 py-3 text-[13px] font-medium text-salty-text max-w-[200px]">
         <p className="truncate">{ticket.title ?? '—'}</p>
       </td>
@@ -182,7 +183,7 @@ function TicketRow({ ticket, canEdit, canDelete }: { ticket: Ticket; canEdit: bo
         </Link>
       </td>
       <td className="px-4 py-3">
-        <div className="flex gap-1">
+        <div className="flex items-center gap-1">
           {canEdit && (
             <button onClick={() => setEditing(true)} className="rounded-md p-1.5 text-salty-muted hover:bg-stone hover:text-salty-text transition-colors" title="Edit">
               <Pencil className="h-3.5 w-3.5" />
@@ -193,9 +194,22 @@ function TicketRow({ ticket, canEdit, canDelete }: { ticket: Ticket; canEdit: bo
               <Trash2 className="h-3.5 w-3.5" />
             </button>
           )}
+          {canView && <ChevronRight className="ml-0.5 h-4 w-4 text-salty-muted transition-colors group-hover:text-ember" />}
         </div>
       </td>
-    </tr>
+    </>
+  )
+
+  return canView ? (
+    <ClickableRow
+      href={`/events/${ticket.id}`}
+      ariaLabel={`View ${ticket.title ?? 'event'} details`}
+      className="group border-b border-salty-border transition-colors hover:bg-cream"
+    >
+      {cells}
+    </ClickableRow>
+  ) : (
+    <tr className="border-b border-salty-border transition-colors hover:bg-cream">{cells}</tr>
   )
 }
 
@@ -203,6 +217,7 @@ export function TicketsClient({ tickets, filters }: { tickets: Ticket[]; filters
   const level = useAccessLevel()
   const canEdit = level <= 3
   const canDelete = level <= 2
+  const canView = level <= 2
 
   return (
     <div className="space-y-4">
@@ -226,7 +241,7 @@ export function TicketsClient({ tickets, filters }: { tickets: Ticket[]; filters
               {tickets.length === 0 ? (
                 <tr><td colSpan={8} className="px-4 py-10 text-center text-[13px] text-salty-muted">No tickets found</td></tr>
               ) : (
-                tickets.map(t => <TicketRow key={t.id} ticket={t} canEdit={canEdit} canDelete={canDelete} />)
+                tickets.map(t => <TicketRow key={t.id} ticket={t} canEdit={canEdit} canDelete={canDelete} canView={canView} />)
               )}
             </tbody>
           </table>

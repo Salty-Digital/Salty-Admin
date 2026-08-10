@@ -78,7 +78,7 @@ export default async function ProfilePage() {
   const levelStyle = LEVEL_COLORS[me?.access_level ?? 4]
 
   return (
-    <div className="p-7 max-w-2xl space-y-6">
+    <div className="p-7 space-y-6">
       {/* Header */}
       <div>
         <h1 className="font-sora text-[20px] font-bold text-salty-text">My Profile</h1>

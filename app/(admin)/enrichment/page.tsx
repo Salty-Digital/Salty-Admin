@@ -1,6 +1,7 @@
 import Link from 'next/link'
 import { requireAdmin } from '@/lib/auth'
 import { createServiceClient } from '@/lib/supabase/server'
+import { ClickableRow } from '@/components/ui/clickable-row'
 
 interface SportsStat {
   ticket_id: string
@@ -27,7 +28,8 @@ function StatCard({ label, value, sub, accent }: { label: string; value: string 
 }
 
 export default async function EnrichmentPage() {
-  await requireAdmin(3)
+  const admin = await requireAdmin(3)
+  const canViewEvent = admin.access_level <= 2 // /events/[id] requires level <= 2
   const db = createServiceClient()
 
   const THIRTY_DAYS_AGO = Date.now() - 30 * 86_400_000
@@ -124,8 +126,8 @@ export default async function EnrichmentPage() {
                 ) : (
                   problemStats.map(s => {
                     const t = ticketMap[s.ticket_id]
-                    return (
-                      <tr key={s.ticket_id} className="border-b border-salty-border last:border-0 hover:bg-cream">
+                    const cells = (
+                      <>
                         <td className="px-4 py-3 text-[13px] font-medium text-salty-text max-w-[220px]"><p className="truncate">{t?.title ?? s.ticket_id.slice(0, 8)}</p></td>
                         <td className="px-4 py-3 text-[12px]">{s.league ?? <span className="text-[#BF4A3A]">missing</span>}</td>
                         <td className="px-4 py-3 text-[12px]">{s.sport ?? <span className="text-[#BF4A3A]">missing</span>}</td>
@@ -134,7 +136,14 @@ export default async function EnrichmentPage() {
                         <td className="px-4 py-3 text-[12px]">
                           {t?.user_id ? <Link href={`/users/${t.user_id}`} className="text-salty-secondary hover:text-ember hover:underline">View</Link> : '—'}
                         </td>
-                      </tr>
+                      </>
+                    )
+                    return canViewEvent ? (
+                      <ClickableRow key={s.ticket_id} href={`/events/${s.ticket_id}`} ariaLabel={`View ${t?.title ?? 'event'} details`} className="border-b border-salty-border last:border-0 hover:bg-cream">
+                        {cells}
+                      </ClickableRow>
+                    ) : (
+                      <tr key={s.ticket_id} className="border-b border-salty-border last:border-0 hover:bg-cream">{cells}</tr>
                     )
                   })
                 )}

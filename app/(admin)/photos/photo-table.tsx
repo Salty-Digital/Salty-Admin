@@ -5,6 +5,8 @@ import Link from 'next/link'
 import { Trash2, Loader2, ExternalLink } from 'lucide-react'
 import { deletePhotoAction } from './actions'
 import { useSort, SortHeader } from '@/components/ui/sortable'
+import { ClickableRow } from '@/components/ui/clickable-row'
+import { useAccessLevel } from '@/components/admin-provider'
 
 interface Photo {
   id: string
@@ -69,6 +71,7 @@ function DeleteCell({ photoId }: { photoId: string }) {
 }
 
 export function PhotoTable({ photos }: { photos: Photo[] }) {
+  const canViewEvent = useAccessLevel() <= 2 // /events/[id] requires level <= 2
   const { sorted, sortState, requestSort } = useSort(photos, {
     id: (p) => p.id,
     user: (p) => p.user_email.toLowerCase(),
@@ -99,42 +102,51 @@ export function PhotoTable({ photos }: { photos: Photo[] }) {
           </tr>
         </thead>
         <tbody>
-          {sorted.map(p => (
-            <tr key={p.id} className="border-b border-salty-border last:border-0 hover:bg-cream">
-              <td className="px-4 py-3 text-[12px] font-mono text-salty-secondary">{p.id.slice(0, 8)}</td>
-              <td className="px-4 py-3 text-[12px] text-salty-secondary">
-                <Link
-                  href={`/users/${p.user_id}`}
-                  className="inline-flex items-center gap-1 hover:text-ember truncate"
-                  title={p.user_email}
-                >
-                  <span className="truncate max-w-[200px]">{p.user_email}</span>
-                  <ExternalLink className="h-2.5 w-2.5 shrink-0" />
-                </Link>
-              </td>
-              <td className="px-4 py-3 text-[12px]">
-                <div className="flex items-center gap-2">
-                  <span className="text-salty-muted capitalize">{p.media_type}</span>
-                  <span
-                    className={`rounded-full px-2 py-0.5 text-[10px] font-semibold ${
-                      METHOD_COLOR[p.match_method ?? ''] ?? 'bg-stone text-salty-muted'
-                    }`}
+          {sorted.map(p => {
+            const cells = (
+              <>
+                <td className="px-4 py-3 text-[12px] font-mono text-salty-secondary">{p.id.slice(0, 8)}</td>
+                <td className="px-4 py-3 text-[12px] text-salty-secondary">
+                  <Link
+                    href={`/users/${p.user_id}`}
+                    className="inline-flex items-center gap-1 hover:text-ember truncate"
+                    title={p.user_email}
                   >
-                    {p.match_method ?? 'unknown'}
-                  </span>
-                </div>
-              </td>
-              <td className="px-4 py-3 text-[12px] font-semibold text-salty-text">
-                {p.match_confidence !== null ? `${Math.round(p.match_confidence * 100)}%` : '—'}
-              </td>
-              <td className="px-4 py-3 text-[12px] text-salty-secondary whitespace-nowrap">
-                {p.taken_at ? new Date(p.taken_at).toLocaleDateString() : '—'}
-              </td>
-              <td className="px-4 py-3">
-                <DeleteCell photoId={p.id} />
-              </td>
-            </tr>
-          ))}
+                    <span className="truncate max-w-[200px]">{p.user_email}</span>
+                    <ExternalLink className="h-2.5 w-2.5 shrink-0" />
+                  </Link>
+                </td>
+                <td className="px-4 py-3 text-[12px]">
+                  <div className="flex items-center gap-2">
+                    <span className="text-salty-muted capitalize">{p.media_type}</span>
+                    <span
+                      className={`rounded-full px-2 py-0.5 text-[10px] font-semibold ${
+                        METHOD_COLOR[p.match_method ?? ''] ?? 'bg-stone text-salty-muted'
+                      }`}
+                    >
+                      {p.match_method ?? 'unknown'}
+                    </span>
+                  </div>
+                </td>
+                <td className="px-4 py-3 text-[12px] font-semibold text-salty-text">
+                  {p.match_confidence !== null ? `${Math.round(p.match_confidence * 100)}%` : '—'}
+                </td>
+                <td className="px-4 py-3 text-[12px] text-salty-secondary whitespace-nowrap">
+                  {p.taken_at ? new Date(p.taken_at).toLocaleDateString() : '—'}
+                </td>
+                <td className="px-4 py-3" data-row-ignore>
+                  <DeleteCell photoId={p.id} />
+                </td>
+              </>
+            )
+            return canViewEvent && p.ticket_id ? (
+              <ClickableRow key={p.id} href={`/events/${p.ticket_id}`} ariaLabel="View event details" className="border-b border-salty-border last:border-0 hover:bg-cream">
+                {cells}
+              </ClickableRow>
+            ) : (
+              <tr key={p.id} className="border-b border-salty-border last:border-0 hover:bg-cream">{cells}</tr>
+            )
+          })}
         </tbody>
       </table>
     </div>

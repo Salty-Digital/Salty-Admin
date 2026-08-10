@@ -54,7 +54,7 @@ export default async function FeatureFlagsPage() {
       </div>
 
       {/* Global kill-switch — release gate (DB-backed, live) */}
-      <div className="max-w-3xl overflow-hidden rounded-[14px] border border-salty-border bg-warm-white">
+      <div className="overflow-hidden rounded-[14px] border border-salty-border bg-warm-white">
         <div className="flex items-center justify-between border-b border-salty-border px-4 py-3">
           <div>
             <p className="font-sora text-[14px] font-bold text-salty-text">Force-update kill-switch</p>
@@ -94,7 +94,7 @@ export default async function FeatureFlagsPage() {
       </div>
 
       {/* Compile-time flags (documented) */}
-      <div className="max-w-3xl overflow-hidden rounded-[14px] border border-salty-border bg-warm-white">
+      <div className="overflow-hidden rounded-[14px] border border-salty-border bg-warm-white">
         <div className="border-b border-salty-border px-4 py-3">
           <p className="font-sora text-[14px] font-bold text-salty-text">App flags (compile-time)</p>
           <p className="text-[11.5px] text-salty-muted">Constants in the mobile build — changing them needs an app release.</p>
@@ -120,7 +120,7 @@ export default async function FeatureFlagsPage() {
       </div>
 
       {/* Per-user consent (DB-backed, live adoption) */}
-      <div className="max-w-3xl overflow-hidden rounded-[14px] border border-salty-border bg-warm-white">
+      <div className="overflow-hidden rounded-[14px] border border-salty-border bg-warm-white">
         <div className="border-b border-salty-border px-4 py-3">
           <p className="font-sora text-[14px] font-bold text-salty-text">Consent (per-user)</p>
           <p className="text-[11.5px] text-salty-muted">DB-backed per-user consents — not global toggles. Current adoption:</p>

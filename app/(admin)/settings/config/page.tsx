@@ -49,7 +49,7 @@ function StatusRow({ name, desc, set }: { name: string; desc: string; set: boole
 
 function Section({ title, subtitle, children }: { title: string; subtitle: string; children: React.ReactNode }) {
   return (
-    <div className="max-w-3xl overflow-hidden rounded-[14px] border border-salty-border bg-warm-white">
+    <div className="overflow-hidden rounded-[14px] border border-salty-border bg-warm-white">
       <div className="border-b border-salty-border px-4 py-3">
         <p className="font-sora text-[14px] font-bold text-salty-text">{title}</p>
         <p className="text-[11.5px] text-salty-muted">{subtitle}</p>

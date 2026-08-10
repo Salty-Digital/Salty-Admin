@@ -1,9 +1,9 @@
 'use client'
 
-import Link from 'next/link'
 import { useMemo, useState } from 'react'
-import { ExternalLink } from 'lucide-react'
+import { ChevronRight } from 'lucide-react'
 import { useSort, SortHeader } from '@/components/ui/sortable'
+import { ClickableRow } from '@/components/ui/clickable-row'
 
 export type Classification = 'real-active' | 'dormant' | 'team'
 
@@ -118,7 +118,7 @@ export function EngagementClient({
                 sorted.map((r) => {
                   const meta = CLASS_META[r.classification]
                   return (
-                    <tr key={r.id} className="border-b border-salty-border last:border-0 transition-colors hover:bg-cream">
+                    <ClickableRow key={r.id} href={`/users/${r.id}`} ariaLabel={`View ${r.email} profile`} className="group border-b border-salty-border last:border-0 transition-colors hover:bg-cream">
                       <td className="px-4 py-3">
                         <div className="flex items-center gap-1.5">
                           <p className="text-[13px] font-medium text-salty-text">{r.email}</p>
@@ -146,12 +146,10 @@ export function EngagementClient({
                           {meta.label}
                         </span>
                       </td>
-                      <td className="px-4 py-3">
-                        <Link href={`/users/${r.id}`} className="text-salty-muted hover:text-ember transition-colors">
-                          <ExternalLink className="h-4 w-4" />
-                        </Link>
+                      <td className="px-4 py-3 text-right">
+                        <ChevronRight className="ml-auto h-4 w-4 text-salty-muted transition-colors group-hover:text-ember" />
                       </td>
-                    </tr>
+                    </ClickableRow>
                   )
                 })
               )}

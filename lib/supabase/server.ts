@@ -36,3 +36,17 @@ export function createServiceClient() {
     { auth: { persistSession: false } },
   )
 }
+
+/**
+ * Client for INVOKING edge functions that build an RLS-scoped Postgres client from the
+ * request's Authorization bearer (enrich-cast, sports-score-lookup). Those functions need
+ * a real JWT bearer, but SUPABASE_SERVICE_KEY is the new `sb_secret_…` format (not a JWT),
+ * so PostgREST rejects it as a bearer. This uses the legacy `service_role` JWT
+ * (SUPABASE_SERVICE_ROLE_JWT), which PostgREST accepts as service_role and lets those
+ * functions bypass RLS. Returns null when the var isn't set.
+ */
+export function createEdgeFunctionClient() {
+  const jwt = process.env.SUPABASE_SERVICE_ROLE_JWT
+  if (!jwt) return null
+  return createClient(process.env.NEXT_PUBLIC_SUPABASE_URL!, jwt, { auth: { persistSession: false } })
+}

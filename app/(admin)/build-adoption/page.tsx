@@ -152,7 +152,7 @@ export default async function BuildAdoptionPage() {
         </div>
       )}
 
-      <div className="grid max-w-5xl gap-4 lg:grid-cols-2">
+      <div className="grid gap-4 lg:grid-cols-2 xl:grid-cols-3">
         {platforms.map((p) => (
           <PlatformCard key={p.platform} p={p} showBars={configured && !queryError} />
         ))}

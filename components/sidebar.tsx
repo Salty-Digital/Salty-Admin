@@ -7,7 +7,7 @@ import {
   Database, Send, Bell, Settings,
   ChevronRight, LogOut, Wifi, Activity, ShieldAlert, MessageSquare,
   MailPlus, MailX, Sparkles, ScanLine, Music, Heart, Compass, Image as ImageIcon, Rocket, LineChart,
-  Smartphone, Gauge, Inbox, UserCheck, KeyRound, ToggleLeft,
+  Smartphone, Gauge, Inbox, UserCheck, KeyRound, ToggleLeft, SquarePen,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { useAdmin } from './admin-provider'
@@ -52,6 +52,7 @@ const NAV_SECTIONS: NavSection[] = [
       { href: '/users/active',    label: 'Active Users',    icon: Activity, maxLevel: 3 },
       { href: '/users/engagement', label: 'Engagement',     icon: UserCheck, maxLevel: 3 },
       { href: '/tickets',         label: 'Tickets',         icon: Ticket,   maxLevel: 3, countVariant: 'gold' },
+      { href: '/manual-edit',     label: 'Manual Edit',     icon: SquarePen, maxLevel: 2 },
       { href: '/pending-imports',   label: 'Imports',          icon: Mail,     maxLevel: 2, countVariant: 'ember' },
       { href: '/gmail-connections', label: 'Email Connections', icon: Wifi,   maxLevel: 2 },
       { href: '/photo-scans',       label: 'Photo Scans',      icon: ScanLine, maxLevel: 3 },

@@ -1,8 +1,8 @@
 'use client'
 
-import Link from 'next/link'
-import { ExternalLink } from 'lucide-react'
+import { ChevronRight } from 'lucide-react'
 import { useSort, SortHeader } from '@/components/ui/sortable'
+import { ClickableRow } from '@/components/ui/clickable-row'
 
 export interface ActiveRow {
   id: string
@@ -77,7 +77,7 @@ export function ActiveUsersTable({ rows, emptyLabel }: { rows: ActiveRow[]; empt
               </tr>
             ) : (
               sorted.map((u) => (
-                <tr key={u.id} className="border-b border-salty-border last:border-0 transition-colors hover:bg-cream">
+                <ClickableRow key={u.id} href={`/users/${u.id}`} ariaLabel={`View ${u.email} profile`} className="group border-b border-salty-border last:border-0 transition-colors hover:bg-cream">
                   <td className="px-4 py-3">
                     <div className="flex items-center gap-1.5">
                       {u.online && (
@@ -103,12 +103,10 @@ export function ActiveUsersTable({ rows, emptyLabel }: { rows: ActiveRow[]; empt
                   <td className="px-4 py-3 text-[13px] text-salty-secondary whitespace-nowrap">{fmtDuration(u.totalSeconds)}</td>
                   <td className="px-4 py-3 text-[13px] text-salty-secondary">{u.sessions || '—'}</td>
                   <td className="px-4 py-3 text-[12px] text-salty-secondary whitespace-nowrap">{relativeTime(u.lastSeen)}</td>
-                  <td className="px-4 py-3">
-                    <Link href={`/users/${u.id}`} className="text-salty-muted hover:text-ember transition-colors">
-                      <ExternalLink className="h-4 w-4" />
-                    </Link>
+                  <td className="px-4 py-3 text-right">
+                    <ChevronRight className="ml-auto h-4 w-4 text-salty-muted transition-colors group-hover:text-ember" />
                   </td>
-                </tr>
+                </ClickableRow>
               ))
             )}
           </tbody>

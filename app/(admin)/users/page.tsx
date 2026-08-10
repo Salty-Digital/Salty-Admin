@@ -7,7 +7,8 @@ import { sanitizeOrFilterTerm } from '@/lib/validate'
 import { Badge } from '@/components/ui/badge'
 import { UserSearch } from './user-search'
 import { SortLink } from '@/components/ui/sortable'
-import { ExternalLink, Download } from 'lucide-react'
+import { ClickableRow } from '@/components/ui/clickable-row'
+import { ChevronRight, Download } from 'lucide-react'
 
 interface PageProps {
   searchParams: Promise<{ q?: string; zip?: string; tier?: string; page?: string; sort?: string; dir?: string }>
@@ -142,7 +143,7 @@ export default async function UsersPage({ searchParams }: PageProps) {
                 <tr><td colSpan={9} className="px-4 py-10 text-center text-[13px] text-salty-muted">No users found</td></tr>
               ) : (
                 (users ?? []).map(u => (
-                  <tr key={u.id} className="border-b border-salty-border last:border-0 transition-colors hover:bg-cream cursor-default">
+                  <ClickableRow key={u.id} href={`/users/${u.id}`} ariaLabel={`View ${u.email} profile`} className="group border-b border-salty-border last:border-0 transition-colors hover:bg-cream">
                     <td className="px-4 py-3">
                       <div className="flex items-center gap-1.5">
                         <p className="text-[13px] font-medium text-salty-text">{admin.access_level <= 2 ? u.email : maskEmail(u.email)}</p>
@@ -179,12 +180,10 @@ export default async function UsersPage({ searchParams }: PageProps) {
                     <td className="px-4 py-3 text-[12px] text-salty-secondary whitespace-nowrap">
                       {new Date(u.created_at).toLocaleDateString()}
                     </td>
-                    <td className="px-4 py-3">
-                      <Link href={`/users/${u.id}`} className="text-salty-muted hover:text-ember transition-colors">
-                        <ExternalLink className="h-4 w-4" />
-                      </Link>
+                    <td className="px-4 py-3 text-right">
+                      <ChevronRight className="ml-auto h-4 w-4 text-salty-muted transition-colors group-hover:text-ember" />
                     </td>
-                  </tr>
+                  </ClickableRow>
                 ))
               )}
             </tbody>

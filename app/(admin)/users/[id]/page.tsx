@@ -7,6 +7,7 @@ import { formatPrice } from '@/lib/format'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { Badge } from '@/components/ui/badge'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
+import { ClickableRow } from '@/components/ui/clickable-row'
 import { DeleteUserButton } from './delete-user-button'
 import { SendNotificationDialog } from './send-notification-dialog'
 import { SendEmailDialog } from './send-email-dialog'
@@ -26,6 +27,7 @@ export default async function UserDetailPage({ params }: PageProps) {
   const db = createServiceClient()
 
   const canViewImports = admin.access_level <= 2
+  const canViewEvent = admin.access_level <= 2 // /events/[id] requires level <= 2
 
   const [
     { data: user },
@@ -37,7 +39,7 @@ export default async function UserDetailPage({ params }: PageProps) {
     authUserResult,
   ] = await Promise.all([
     db.from('users').select('*, banned_until').eq('id', id).single(),
-    db.from('tickets').select('*').eq('user_id', id).order('imported_at', { ascending: false }).limit(20),
+    db.from('tickets').select('*').eq('user_id', id).order('imported_at', { ascending: false }).limit(1000),
     db.from('friendships').select('requester_id, addressee_id, status').or(`requester_id.eq.${id},addressee_id.eq.${id}`),
     db.from('gmail_connections').select('email, last_synced_at, connected_at').eq('user_id', id).maybeSingle(),
     canViewImports
@@ -187,16 +189,25 @@ export default async function UserDetailPage({ params }: PageProps) {
                 {(tickets ?? []).length === 0 ? (
                   <TableRow><TableCell colSpan={6} className="text-center text-salty-muted py-6">No tickets</TableCell></TableRow>
                 ) : (
-                  (tickets ?? []).map(t => (
-                    <TableRow key={t.id}>
-                      <TableCell className="font-medium">{t.title ?? '—'}</TableCell>
-                      <TableCell><Badge variant="secondary" className="text-xs capitalize">{t.category}</Badge></TableCell>
-                      <TableCell className="text-salty-muted text-sm">{t.date_str ?? '—'}</TableCell>
-                      <TableCell className="text-salty-muted text-sm capitalize">{t.source}</TableCell>
-                      <TableCell className="text-sm font-medium">{formatPrice(t.price_paid, t.price_currency)}</TableCell>
-                      <TableCell><Badge variant="outline" className="text-xs capitalize">{t.status}</Badge></TableCell>
-                    </TableRow>
-                  ))
+                  (tickets ?? []).map(t => {
+                    const cells = (
+                      <>
+                        <TableCell className="font-medium">{t.title ?? '—'}</TableCell>
+                        <TableCell><Badge variant="secondary" className="text-xs capitalize">{t.category}</Badge></TableCell>
+                        <TableCell className="text-salty-muted text-sm">{t.date_str ?? '—'}</TableCell>
+                        <TableCell className="text-salty-muted text-sm capitalize">{t.source}</TableCell>
+                        <TableCell className="text-sm font-medium">{formatPrice(t.price_paid, t.price_currency)}</TableCell>
+                        <TableCell><Badge variant="outline" className="text-xs capitalize">{t.status}</Badge></TableCell>
+                      </>
+                    )
+                    return canViewEvent ? (
+                      <ClickableRow key={t.id} href={`/events/${t.id}`} ariaLabel={`View ${t.title ?? 'event'} details`} className="border-b transition-colors hover:bg-muted/50">
+                        {cells}
+                      </ClickableRow>
+                    ) : (
+                      <TableRow key={t.id}>{cells}</TableRow>
+                    )
+                  })
                 )}
               </TableBody>
             </Table>

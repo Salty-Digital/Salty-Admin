@@ -50,7 +50,7 @@ export default async function ReleaseGatePage() {
       {rows.length === 0 ? (
         <p className="text-[13px] text-salty-muted">No release-gate rows found.</p>
       ) : (
-        <div className="grid max-w-4xl gap-4 lg:grid-cols-2">
+        <div className="grid gap-4 lg:grid-cols-2 xl:grid-cols-3">
           {rows.map((row) => (
             <ReleaseGateForm key={row.platform} row={row} meta={PLATFORM_META[row.platform]} />
           ))}
