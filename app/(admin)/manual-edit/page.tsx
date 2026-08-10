@@ -7,6 +7,7 @@ import { ManualEditClient, type TicketFull } from './manual-edit-client'
 import { ManualEditFilters } from './manual-edit-filters'
 import { QueueCard } from './queue-card'
 import { BulkActions } from './bulk-actions'
+import { CategoryVerifier } from './category-verifier'
 import { Search, SquarePen } from 'lucide-react'
 
 export const dynamic = 'force-dynamic'
@@ -170,7 +171,10 @@ export default async function ManualEditPage({ searchParams }: PageProps) {
           </p>
 
           {view === 'pending' && filtered.length > 0 && (
-            <BulkActions rows={filtered.map((r) => ({ id: r.id, category: r.category, flags: r.flags }))} />
+            <>
+              <BulkActions rows={filtered.map((r) => ({ id: r.id, category: r.category, flags: r.flags }))} />
+              <CategoryVerifier rows={filtered.map((r) => ({ id: r.id, title: r.title, venue_name: r.venue_name, date_str: r.date_str, category: r.category }))} />
+            </>
           )}
         </>
       )}
