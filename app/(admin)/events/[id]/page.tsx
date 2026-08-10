@@ -4,7 +4,7 @@ import { requireAdmin } from '@/lib/auth'
 import { createServiceClient } from '@/lib/supabase/server'
 import { formatPrice } from '@/lib/format'
 import { CATEGORY_LABELS, CATEGORY_COLORS, CATEGORY_EMOJI } from '@/lib/categories'
-import { MediaGallery, type MediaItem } from './media-gallery'
+import { type MediaItem } from './media-gallery'
 import { CastPanel } from './cast-panel'
 import { BackButton } from './back-button'
 import {
@@ -125,6 +125,15 @@ export default async function EventDetailsPage({ params }: PageProps) {
     taken_at: p.taken_at,
     match_method: p.match_method,
   }))
+  // The admin only needs to know how many photos/videos are attached, not to view a
+  // user's personal media. Counts are computed server-side so the storage URLs never
+  // reach the browser.
+  const videoCount = media.filter((m) => m.media_type === 'video').length
+  const photoCount = media.length - videoCount
+  const mediaSummary =
+    videoCount === 0 ? `${photoCount} photo${photoCount === 1 ? '' : 's'}`
+    : photoCount === 0 ? `${videoCount} video${videoCount === 1 ? '' : 's'}`
+    : `${photoCount} photo${photoCount === 1 ? '' : 's'}, ${videoCount} video${videoCount === 1 ? '' : 's'}`
 
   const personName = (uid: string | null) => {
     if (!uid) return 'Unknown'
@@ -344,9 +353,19 @@ export default async function EventDetailsPage({ params }: PageProps) {
         </Section>
       )}
 
-      {/* Photos */}
+      {/* Photos & videos — hidden to protect the user's privacy; only the count is shown. */}
       <Section icon={TicketIcon} title="Photos & videos" extra={String(media.length)}>
-        <MediaGallery items={media} />
+        {media.length === 0 ? (
+          <p className="text-[13px] text-salty-muted">No photos or videos.</p>
+        ) : (
+          <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
+            <p className="text-[13px] text-salty-text">
+              <span className="font-semibold">{media.length}</span> {media.length === 1 ? 'item' : 'items'} attached
+              <span className="text-salty-muted"> · {mediaSummary}</span>
+            </p>
+            <span className="text-[12px] text-salty-muted">— hidden to protect the user&apos;s privacy</span>
+          </div>
+        )}
       </Section>
 
       {/* Meta */}

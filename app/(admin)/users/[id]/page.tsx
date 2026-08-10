@@ -36,6 +36,7 @@ export default async function UserDetailPage({ params }: PageProps) {
     { data: gmail },
     { data: pendingImports },
     { data: userFeedback },
+    photosCountRes,
     authUserResult,
   ] = await Promise.all([
     db.from('users').select('*, banned_until').eq('id', id).single(),
@@ -46,10 +47,14 @@ export default async function UserDetailPage({ params }: PageProps) {
       ? db.from('pending_imports').select('*').eq('user_id', id).order('created_at', { ascending: false }).limit(20)
       : Promise.resolve({ data: [] }),
     db.from('feedback').select('id, category, rating, message, status, created_at').eq('user_id', id).order('created_at', { ascending: false }),
+    // Count only — never fetch a user's photo URLs into the admin app.
+    db.from('photos').select('id', { count: 'exact', head: true }).eq('user_id', id),
     db.auth.admin.getUserById(id),
   ])
 
   if (!user) notFound()
+
+  const photoCount = photosCountRes.count ?? 0
 
   const lastSignIn: string | null = authUserResult.data?.user?.last_sign_in_at ?? null
 
@@ -143,6 +148,7 @@ export default async function UserDetailPage({ params }: PageProps) {
         <div className="lg:col-span-2 grid grid-cols-3 gap-3 content-start">
           {[
             { label: 'Tickets', value: tickets?.length ?? 0 },
+            { label: 'Photos', value: photoCount },
             { label: 'Friends', value: friendIds.length },
             ...(canViewImports ? [{ label: 'Pending imports', value: pendingImports?.length ?? 0 }] : []),
             { label: 'Feedback submitted', value: userFeedback?.length ?? 0 },
