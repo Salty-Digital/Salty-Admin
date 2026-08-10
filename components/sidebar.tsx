@@ -7,7 +7,7 @@ import {
   Database, Send, Bell, Settings,
   ChevronRight, LogOut, Wifi, Activity, ShieldAlert, MessageSquare,
   MailPlus, MailX, Sparkles, ScanLine, Music, Heart, Compass, Image as ImageIcon, Rocket, LineChart,
-  Smartphone, Gauge, Inbox, UserCheck, KeyRound, ToggleLeft, SquarePen,
+  Smartphone, Gauge, Inbox, UserCheck, KeyRound, ToggleLeft, SquarePen, HeartPulse,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { useAdmin } from './admin-provider'
@@ -83,6 +83,7 @@ const NAV_SECTIONS: NavSection[] = [
   {
     label: 'System',
     items: [
+      { href: '/health',                label: 'Health',       icon: HeartPulse, maxLevel: 1 },
       { href: '/release-gate',          label: 'Release Gate', icon: Smartphone, maxLevel: 1 },
       { href: '/settings/config',       label: 'Config Status', icon: KeyRound, maxLevel: 1 },
       { href: '/settings/feature-flags', label: 'Feature Flags', icon: ToggleLeft, maxLevel: 1 },
