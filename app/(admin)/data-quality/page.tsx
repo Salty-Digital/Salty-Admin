@@ -108,10 +108,10 @@ export default async function DataQualityPage() {
       <Panel icon={PieChart} title="Tickets by category">
         <div className="grid grid-cols-2 gap-px bg-salty-border sm:grid-cols-3 lg:grid-cols-5">
           {cats.map(([c, n]) => (
-            <div key={c} className="bg-warm-white p-3.5">
+            <Link key={c} href={`/tickets?category=${c}`} className="block bg-warm-white p-3.5 transition-colors hover:bg-cream" title={`View all ${CATEGORY_LABELS[c] ?? c} tickets`}>
               <p className="truncate text-[11px] font-semibold uppercase tracking-[0.05em] text-salty-muted">{CATEGORY_LABELS[c] ?? c}</p>
               <p className="mt-0.5 font-sora text-[19px] font-bold text-salty-text">{n.toLocaleString()}</p>
-            </div>
+            </Link>
           ))}
         </div>
       </Panel>

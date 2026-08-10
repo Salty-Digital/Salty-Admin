@@ -8,6 +8,7 @@ export interface LoginRow {
   ip_address: string | null
   user_agent: string | null
   created_at: string
+  isNewIp?: boolean
 }
 
 function timeAgo(iso: string): string {
@@ -71,7 +72,12 @@ export function LoginHistory({ rows }: { rows: LoginRow[] }) {
                   <td className="px-4 py-3 text-[12px] text-salty-secondary">
                     <span suppressHydrationWarning title={new Date(r.created_at).toLocaleString()}>{timeAgo(r.created_at)}</span>
                   </td>
-                  <td className="px-4 py-3 font-mono text-[12px] text-salty-secondary">{r.ip_address ?? '—'}</td>
+                  <td className="px-4 py-3 font-mono text-[12px] text-salty-secondary">
+                    {r.ip_address ?? '—'}
+                    {r.isNewIp && (
+                      <span className="ml-2 rounded-full border border-[#EAD9A6] bg-[#FFF8E6] px-1.5 py-0.5 font-sans text-[10px] font-semibold text-[#8A6830]">New IP</span>
+                    )}
+                  </td>
                   <td className="px-4 py-3 text-[12px] text-salty-secondary">{parseDevice(r.user_agent)}</td>
                 </tr>
               ))
