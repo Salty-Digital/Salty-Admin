@@ -5,7 +5,10 @@ import Link from 'next/link'
 import { useRouter, usePathname } from 'next/navigation'
 import { Pencil, Trash2, Check, X, Loader2, ExternalLink, ChevronRight } from 'lucide-react'
 import { Badge } from '@/components/ui/badge'
-import { editTicketAction, deleteTicketAction } from './actions'
+import {
+  editTicketAction, deleteTicketAction,
+  bulkSetCategoryAction, bulkSetStatusAction, bulkDeleteTicketsAction,
+} from './actions'
 import { useAccessLevel } from '@/components/admin-provider'
 import { formatPrice } from '@/lib/format'
 import { TICKET_CATEGORIES, TICKET_SOURCES, CATEGORY_LABELS } from '@/lib/categories'
@@ -13,6 +16,7 @@ import { SortLink } from '@/components/ui/sortable'
 import { ClickableRow } from '@/components/ui/clickable-row'
 
 const STATUSES = ['active', 'archived', 'pending']
+const checkboxCls = 'h-4 w-4 shrink-0 cursor-pointer rounded border-salty-border accent-ember'
 
 interface Ticket {
   id: string
@@ -78,7 +82,7 @@ function FilterBar({ filters }: { filters: Filters }) {
   )
 }
 
-function TicketRow({ ticket, canEdit, canDelete, canView }: { ticket: Ticket; canEdit: boolean; canDelete: boolean; canView: boolean }) {
+function TicketRow({ ticket, canEdit, canDelete, canView, selected, onToggle }: { ticket: Ticket; canEdit: boolean; canDelete: boolean; canView: boolean; selected: boolean; onToggle: () => void }) {
   const [editing, setEditing] = useState(false)
   const [deleting, setDeleting] = useState(false)
   const [pending, startTransition] = useTransition()
@@ -115,6 +119,7 @@ function TicketRow({ ticket, canEdit, canDelete, canView }: { ticket: Ticket; ca
   if (editing) {
     return (
       <tr className="border-b border-salty-border bg-ember-light/30">
+        <td className="px-4 py-2"><input type="checkbox" checked={selected} onChange={onToggle} className={checkboxCls} aria-label="Select ticket" /></td>
         <td className="px-4 py-2"><input className={inp} value={fields.title} onChange={e => setFields(f => ({...f, title: e.target.value}))} placeholder="Title" /></td>
         <td className="px-4 py-2"><input className={inp} value={fields.venue_name} onChange={e => setFields(f => ({...f, venue_name: e.target.value}))} placeholder="Venue" /></td>
         <td className="px-4 py-2"><input className={inp} value={fields.date_str} onChange={e => setFields(f => ({...f, date_str: e.target.value}))} placeholder="Date" /></td>
@@ -143,7 +148,7 @@ function TicketRow({ ticket, canEdit, canDelete, canView }: { ticket: Ticket; ca
   if (deleting) {
     return (
       <tr className="border-b border-salty-border bg-[#FDEDED]/40">
-        <td colSpan={8} className="px-4 py-3">
+        <td colSpan={9} className="px-4 py-3">
           <div className="flex items-center gap-3">
             <span className="text-[13px] text-[#BF4A3A]">Delete <strong>{ticket.title ?? 'this ticket'}</strong>? This cannot be undone.</span>
             <button onClick={confirmDelete} disabled={pending} className="flex items-center gap-1 rounded-md bg-[#FDEDED] px-2.5 py-1 text-[11px] font-semibold text-[#BF4A3A] border border-[#F0C4C4] hover:bg-[#F5D0D0]">
@@ -158,6 +163,9 @@ function TicketRow({ ticket, canEdit, canDelete, canView }: { ticket: Ticket; ca
 
   const cells = (
     <>
+      <td className="px-4 py-3" data-row-ignore>
+        <input type="checkbox" checked={selected} onChange={onToggle} className={checkboxCls} aria-label="Select ticket" />
+      </td>
       <td className="px-4 py-3 text-[13px] font-medium text-salty-text max-w-[200px]">
         <p className="truncate">{ticket.title ?? '—'}</p>
       </td>
@@ -219,14 +227,81 @@ export function TicketsClient({ tickets, filters }: { tickets: Ticket[]; filters
   const canDelete = level <= 2
   const canView = level <= 2
 
+  const router = useRouter()
+  const [selected, setSelected] = useState<Set<string>>(new Set())
+  const [busy, startBulk] = useTransition()
+  const [confirmDelete, setConfirmDelete] = useState(false)
+  const [msg, setMsg] = useState<string | null>(null)
+
+  const allSelected = tickets.length > 0 && tickets.every(t => selected.has(t.id))
+  const toggleAll = () => setSelected(allSelected ? new Set() : new Set(tickets.map(t => t.id)))
+  const toggleOne = (id: string) => setSelected(prev => {
+    const n = new Set(prev)
+    if (n.has(id)) n.delete(id); else n.add(id)
+    return n
+  })
+  const clear = () => { setSelected(new Set()); setConfirmDelete(false) }
+
+  function runBulk(fn: () => Promise<{ ok: true; count: number } | { ok: false; error: string }>, verb: (n: number) => string) {
+    setMsg(null)
+    startBulk(async () => {
+      const res = await fn()
+      if (res.ok) { setMsg(verb(res.count)); clear(); router.refresh() }
+      else setMsg(res.error)
+    })
+  }
+
+  const ids = () => [...selected]
+  const selCls = 'rounded-lg border border-salty-border bg-warm-white px-2.5 py-1.5 text-[12.5px] text-salty-text focus:border-ember focus:outline-none disabled:opacity-50'
+
   return (
     <div className="space-y-4">
       <FilterBar filters={filters} />
+
+      {canEdit && selected.size > 0 && (
+        <div className="flex flex-wrap items-center gap-3 rounded-[12px] border border-salty-border bg-cream/60 px-4 py-2.5">
+          <span className="text-[13px] font-medium text-salty-text">{selected.size} selected</span>
+          <button onClick={clear} className="text-[12.5px] text-salty-muted hover:text-salty-text">Clear</button>
+
+          <select value="" disabled={busy} aria-label="Recategorise selected"
+            onChange={e => { const v = e.target.value; if (v) runBulk(() => bulkSetCategoryAction(ids(), v), n => `Recategorised ${n} ticket${n === 1 ? '' : 's'} to ${CATEGORY_LABELS[v] ?? v}.`) }}
+            className={selCls}>
+            <option value="">Recategorise…</option>
+            {TICKET_CATEGORIES.map(c => <option key={c} value={c}>{CATEGORY_LABELS[c] ?? c}</option>)}
+          </select>
+
+          <select value="" disabled={busy} aria-label="Set status of selected"
+            onChange={e => { const v = e.target.value; if (v) runBulk(() => bulkSetStatusAction(ids(), v), n => `Set ${n} ticket${n === 1 ? '' : 's'} to ${v}.`) }}
+            className={selCls}>
+            <option value="">Set status…</option>
+            {STATUSES.map(s => <option key={s} value={s}>{s}</option>)}
+          </select>
+
+          {canDelete && (confirmDelete ? (
+            <span className="inline-flex items-center gap-2">
+              <span className="text-[12.5px] text-salty-muted">Delete {selected.size} permanently?</span>
+              <button onClick={() => runBulk(() => bulkDeleteTicketsAction(ids()), n => `Deleted ${n} ticket${n === 1 ? '' : 's'}.`)} disabled={busy} className="inline-flex items-center gap-1 rounded-md bg-[#BF4A3A] px-2.5 py-1 text-[12px] font-semibold text-white hover:bg-[#A53D30] disabled:opacity-60">
+                {busy ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : 'Confirm delete'}
+              </button>
+              <button onClick={() => setConfirmDelete(false)} disabled={busy} className="rounded-md bg-stone px-2.5 py-1 text-[12px] text-salty-secondary hover:bg-cream">Cancel</button>
+            </span>
+          ) : (
+            <button onClick={() => setConfirmDelete(true)} className="inline-flex items-center gap-1 rounded-md border border-[#F0C4C4] bg-[#FDEDED] px-3 py-1.5 text-[12.5px] font-semibold text-[#BF4A3A] hover:bg-[#F5D0D0]">
+              <Trash2 className="h-3.5 w-3.5" /> Delete selected
+            </button>
+          ))}
+
+          {busy && <Loader2 className="h-4 w-4 animate-spin text-salty-muted" />}
+        </div>
+      )}
+      {msg && !busy && <p className="text-[12.5px] text-salty-muted">{msg}</p>}
+
       <div className="overflow-hidden rounded-[14px] border border-salty-border bg-warm-white">
         <div className="overflow-x-auto">
           <table className="w-full">
             <thead>
               <tr className="border-b border-salty-border bg-cream">
+                <th className="w-9 px-4 py-3"><input type="checkbox" checked={allSelected} onChange={toggleAll} className={checkboxCls} aria-label="Select all" /></th>
                 <SortLink label="Title" sortKey="title" className="px-4 py-3 text-left text-[11px] font-semibold uppercase tracking-[0.06em] text-salty-muted" />
                 <SortLink label="Venue" sortKey="venue" className="px-4 py-3 text-left text-[11px] font-semibold uppercase tracking-[0.06em] text-salty-muted" />
                 <SortLink label="Date" sortKey="date" className="px-4 py-3 text-left text-[11px] font-semibold uppercase tracking-[0.06em] text-salty-muted" />
@@ -239,9 +314,9 @@ export function TicketsClient({ tickets, filters }: { tickets: Ticket[]; filters
             </thead>
             <tbody>
               {tickets.length === 0 ? (
-                <tr><td colSpan={8} className="px-4 py-10 text-center text-[13px] text-salty-muted">No tickets found</td></tr>
+                <tr><td colSpan={9} className="px-4 py-10 text-center text-[13px] text-salty-muted">No tickets found</td></tr>
               ) : (
-                tickets.map(t => <TicketRow key={t.id} ticket={t} canEdit={canEdit} canDelete={canDelete} canView={canView} />)
+                tickets.map(t => <TicketRow key={t.id} ticket={t} canEdit={canEdit} canDelete={canDelete} canView={canView} selected={selected.has(t.id)} onToggle={() => toggleOne(t.id)} />)
               )}
             </tbody>
           </table>

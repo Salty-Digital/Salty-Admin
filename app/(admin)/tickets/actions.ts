@@ -45,3 +45,55 @@ export async function deleteTicketAction(ticketId: string) {
   await logAudit(admin.id, 'delete_ticket', 'ticket', tid, { title: ticket.title, user_id: ticket.user_id })
   revalidatePath('/tickets')
 }
+
+// ── Bulk actions ─────────────────────────────────────────────────────────────────
+const TICKET_STATUSES = ['active', 'archived', 'pending'] as const
+type BulkResult = { ok: true; count: number } | { ok: false; error: string }
+
+function cleanIds(ticketIds: string[]): string[] {
+  return [...new Set(ticketIds.map((id) => assertUUID(id, 'Ticket ID')))].slice(0, 1000)
+}
+
+export async function bulkSetCategoryAction(ticketIds: string[], category: string): Promise<BulkResult> {
+  try {
+    const admin = await requireAdmin(3)
+    const cat = assertEnum(category, TICKET_CATEGORIES, 'Category')
+    const ids = cleanIds(ticketIds)
+    if (ids.length === 0) return { ok: true, count: 0 }
+    const db = createServiceClient()
+    const { error } = await db.from('tickets').update({ category: cat }).in('id', ids)
+    if (error) return { ok: false, error: error.message }
+    await logAudit(admin.id, 'bulk_set_category', 'ticket', undefined, { count: ids.length, category: cat })
+    revalidatePath('/tickets')
+    return { ok: true, count: ids.length }
+  } catch (e) { return { ok: false, error: (e as Error).message } }
+}
+
+export async function bulkSetStatusAction(ticketIds: string[], status: string): Promise<BulkResult> {
+  try {
+    const admin = await requireAdmin(3)
+    const st = assertEnum(status, TICKET_STATUSES, 'Status')
+    const ids = cleanIds(ticketIds)
+    if (ids.length === 0) return { ok: true, count: 0 }
+    const db = createServiceClient()
+    const { error } = await db.from('tickets').update({ status: st }).in('id', ids)
+    if (error) return { ok: false, error: error.message }
+    await logAudit(admin.id, 'bulk_set_status', 'ticket', undefined, { count: ids.length, status: st })
+    revalidatePath('/tickets')
+    return { ok: true, count: ids.length }
+  } catch (e) { return { ok: false, error: (e as Error).message } }
+}
+
+export async function bulkDeleteTicketsAction(ticketIds: string[]): Promise<BulkResult> {
+  try {
+    const admin = await requireAdmin(2)
+    const ids = cleanIds(ticketIds)
+    if (ids.length === 0) return { ok: true, count: 0 }
+    const db = createServiceClient()
+    const { error } = await db.from('tickets').delete().in('id', ids)
+    if (error) return { ok: false, error: error.message }
+    await logAudit(admin.id, 'bulk_delete_tickets', 'ticket', undefined, { count: ids.length })
+    revalidatePath('/tickets')
+    return { ok: true, count: ids.length }
+  } catch (e) { return { ok: false, error: (e as Error).message } }
+}
