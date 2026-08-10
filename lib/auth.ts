@@ -18,12 +18,21 @@ export async function getAdminUser(): Promise<AdminUser | null> {
   const service = createServiceClient()
   const { data } = await service
     .from('admin_users')
-    .select('id, email, full_name, access_level, is_active')
+    .select('id, email, full_name, access_level, is_active, last_active_at')
     .eq('email', user.email)
     .eq('is_active', true)
     .single()
 
   if (!data) return null
+
+  // Keep "last active" fresh so the Admin Users page reflects real recent use, not just the
+  // last password login (sessions persist, so last_login_at rarely moves). Throttled to at
+  // most one write every 2 minutes per admin, so it isn't a write on every page load.
+  const stale = !data.last_active_at || Date.now() - Date.parse(data.last_active_at) > 120_000
+  if (stale) {
+    await service.from('admin_users').update({ last_active_at: new Date().toISOString() }).eq('id', data.id)
+  }
+
   return { id: data.id, email: data.email, full_name: data.full_name, access_level: data.access_level }
 }
 

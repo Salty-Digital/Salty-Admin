@@ -14,6 +14,23 @@ import {
 } from '@/components/ui/dialog'
 import { Button } from '@/components/ui/button'
 
+// Compact "time ago" for the Last Login column. Duration-based, so it's timezone-agnostic
+// (a bare toLocaleDateString flips a day across the UTC/local boundary and can't convey
+// recency at a glance).
+function timeAgo(iso: string): string {
+  const diff = Date.now() - new Date(iso).getTime()
+  if (diff < 60_000) return 'Just now'
+  const mins = Math.floor(diff / 60_000)
+  const hrs  = Math.floor(diff / 3_600_000)
+  const days = Math.floor(diff / 86_400_000)
+  if (mins < 60) return `${mins} min${mins === 1 ? '' : 's'} ago`
+  if (hrs  < 24) return `${hrs} hour${hrs === 1 ? '' : 's'} ago`
+  if (days < 7)  return `${days} day${days === 1 ? '' : 's'} ago`
+  if (days < 30) { const w = Math.floor(days / 7); return `${w} week${w === 1 ? '' : 's'} ago` }
+  if (days < 365) { const mo = Math.floor(days / 30); return `${mo} month${mo === 1 ? '' : 's'} ago` }
+  const y = Math.floor(days / 365); return `${y} year${y === 1 ? '' : 's'} ago`
+}
+
 interface AdminRow {
   id: string
   email: string
@@ -21,6 +38,7 @@ interface AdminRow {
   access_level: number
   is_active: boolean
   last_login_at: string | null
+  last_active_at: string | null
   created_at: string
   invited_by_email?: string
 }
@@ -47,7 +65,7 @@ export function AdminUsersClient({ rows, currentAdminId }: { rows: AdminRow[]; c
     admin: (r) => (r.full_name ?? r.email).toLowerCase(),
     level: (r) => r.access_level,
     status: (r) => (r.is_active ? 1 : 0),
-    lastLogin: (r) => (r.last_login_at ? Date.parse(r.last_login_at) : null),
+    lastActive: (r) => { const t = r.last_active_at ?? r.last_login_at; return t ? Date.parse(t) : null },
     invitedBy: (r) => (r.invited_by_email ?? '').toLowerCase(),
   })
 
@@ -123,7 +141,7 @@ export function AdminUsersClient({ rows, currentAdminId }: { rows: AdminRow[]; c
               <SortHeader label="Admin" sortKey="admin" sortState={sortState} onSort={requestSort} className="px-4 py-3" />
               <SortHeader label="Access Level" sortKey="level" sortState={sortState} onSort={requestSort} className="px-4 py-3" />
               <SortHeader label="Status" sortKey="status" sortState={sortState} onSort={requestSort} className="px-4 py-3" />
-              <SortHeader label="Last Login" sortKey="lastLogin" sortState={sortState} onSort={requestSort} className="px-4 py-3" />
+              <SortHeader label="Last Active" sortKey="lastActive" sortState={sortState} onSort={requestSort} className="px-4 py-3" />
               <SortHeader label="Invited By" sortKey="invitedBy" sortState={sortState} onSort={requestSort} className="px-4 py-3" />
               <th className="px-4 py-3">Actions</th>
             </tr>
@@ -142,6 +160,7 @@ export function AdminUsersClient({ rows, currentAdminId }: { rows: AdminRow[]; c
 function AdminUserRow({ row, isSelf }: { row: AdminRow; isSelf: boolean }) {
   const [pending, startTransition] = useTransition()
   const initials = (row.full_name ?? row.email).slice(0, 2).toUpperCase()
+  const activeAt = row.last_active_at ?? row.last_login_at
 
   function changeLevel(val: string) {
     startTransition(() => changeAccessLevelAction(row.id, Number(val)))
@@ -187,7 +206,13 @@ function AdminUserRow({ row, isSelf }: { row: AdminRow; isSelf: boolean }) {
         </span>
       </td>
       <td className="px-4 py-3 text-[12px] text-salty-secondary">
-        {row.last_login_at ? new Date(row.last_login_at).toLocaleDateString() : '—'}
+        {activeAt ? (
+          <span suppressHydrationWarning title={new Date(activeAt).toLocaleString()}>
+            {timeAgo(activeAt)}
+          </span>
+        ) : (
+          <span className="text-salty-muted">Never</span>
+        )}
       </td>
       <td className="px-4 py-3 text-[12px] text-salty-secondary">{row.invited_by_email ?? '—'}</td>
       <td className="px-4 py-3">

@@ -8,7 +8,7 @@ export default async function AdminUsersPage() {
 
   const { data: admins } = await db
     .from('admin_users')
-    .select('id, email, full_name, access_level, is_active, last_login_at, created_at, invited_by')
+    .select('id, email, full_name, access_level, is_active, last_login_at, last_active_at, created_at, invited_by')
     .order('created_at', { ascending: true })
 
   // Resolve invited_by emails
