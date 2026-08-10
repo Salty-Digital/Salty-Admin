@@ -34,6 +34,7 @@ async function getDashboardData() {
   SIX_MONTHS_AGO.setMonth(SIX_MONTHS_AGO.getMonth() - 6)
   const cutoff = SIX_MONTHS_AGO.toISOString()
   const nowIso = new Date().toISOString()
+  const dayAgo = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString()
 
   const [
     { count: userCount },
@@ -48,6 +49,8 @@ async function getDashboardData() {
     { data: pendingImports },
     { data: recentFeedback },
     { data: recentAuditLog },
+    { count: approved24 },
+    { count: rejected24 },
   ] = await Promise.all([
     db.from('users').select('*', { count: 'exact', head: true }),
     db.from('tickets').select('*', { count: 'exact', head: true }),
@@ -67,6 +70,8 @@ async function getDashboardData() {
       .order('created_at', { ascending: false }).limit(5),
     db.from('admin_audit_log').select('id, admin_id, action, target_type, created_at')
       .order('created_at', { ascending: false }).limit(5),
+    db.from('pending_imports').select('*', { count: 'exact', head: true }).eq('status', 'approved').gte('created_at', dayAgo),
+    db.from('pending_imports').select('*', { count: 'exact', head: true }).eq('status', 'rejected').gte('created_at', dayAgo),
   ])
 
   // ── Ticket activity by month ─────────────────────────────────────────
@@ -113,6 +118,10 @@ async function getDashboardData() {
   const emailAdoption = (userCount ?? 0) > 0 ? Math.round(emailConnectedCount / (userCount ?? 1) * 100) : 0
   const bannedPct = (userCount ?? 0) > 0 ? Math.round((bannedCount ?? 0) / (userCount ?? 1) * 100) : 0
 
+  // 24h import-review health — drives the dashboard alert banner.
+  const reviewed24 = (approved24 ?? 0) + (rejected24 ?? 0)
+  const rejectRate24 = reviewed24 > 0 ? Math.round(((rejected24 ?? 0) / reviewed24) * 100) : 0
+
   // Recent activity: combine recent users + feedback + admin actions into a single feed
   const activityFeed = [
     ...(recentUsers ?? []).slice(0, 2).map((u) => ({
@@ -153,6 +162,8 @@ async function getDashboardData() {
     pendingImports: pendingImports ?? [],
     activityFeed,
     recentUsers: recentUsers ?? [],
+    rejectRate24,
+    reviewed24,
   }
 }
 
@@ -255,6 +266,15 @@ export default async function DashboardPage() {
   await requireAdmin()
   const d = await getDashboardData()
 
+  // Threshold alerts — surfaced where admins already look, computed live (no cron/email).
+  const alerts: string[] = []
+  if (d.reviewed24 >= 10 && d.rejectRate24 > 60) {
+    alerts.push(`Import reject rate is ${d.rejectRate24}% over the last 24h — the importer or classifier may be regressing.`)
+  }
+  if (d.pendingCount > 1000) {
+    alerts.push(`${d.pendingCount.toLocaleString()} imports are pending review — the queue is backing up.`)
+  }
+
   const kpis = [
     { label: 'Total Users',      value: d.userCount,           icon: Users,       accent: '#E8581A' },
     { label: 'Tickets Stored',   value: d.ticketCount,         icon: Ticket,      accent: '#C8A96E' },
@@ -265,6 +285,18 @@ export default async function DashboardPage() {
 
   return (
     <div className="p-7 space-y-6">
+
+      {/* ── Threshold alerts ── */}
+      {alerts.length > 0 && (
+        <div className="rounded-[14px] border border-[#EAD9A6] bg-[#FFF8E6] p-4">
+          <p className="flex items-center gap-2 font-sora text-[13px] font-bold text-[#8A6830]">
+            <AlertTriangle className="h-4 w-4" /> Needs attention
+          </p>
+          <ul className="mt-1.5 list-disc space-y-1 pl-6 text-[12.5px] text-[#8A6830]">
+            {alerts.map((a, i) => <li key={i}>{a}</li>)}
+          </ul>
+        </div>
+      )}
 
       {/* ── KPI row ── */}
       <div className="grid grid-cols-2 gap-4 lg:grid-cols-5">

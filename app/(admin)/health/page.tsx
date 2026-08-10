@@ -6,6 +6,7 @@ import {
 import { requireAdmin } from '@/lib/auth'
 import { createServiceClient } from '@/lib/supabase/server'
 import { isConfigStatusConfigured, fetchMobileSecretStatus } from '@/lib/config-status'
+import { HealthRefresher } from './health-refresher'
 
 // A health page must reflect live state, never a cached render.
 export const dynamic = 'force-dynamic'
@@ -90,18 +91,31 @@ async function loadMobile(): Promise<{ configured: boolean; known: Record<string
 async function loadSnapshot(db: Db) {
   const head = { count: 'exact' as const, head: true }
   const sinceH = (h: number) => new Date(Date.now() - h * 3_600_000).toISOString()
-  const [users, tickets, photos, pending, imports24, signups7d] = await Promise.all([
+  const [users, tickets, photos, pending, imports24, signups7d, approved24, rejected24] = await Promise.all([
     db.from('users').select('id', head),
     db.from('tickets').select('id', head),
     db.from('photos').select('id', head),
     db.from('pending_imports').select('id', head).eq('status', 'pending'),
     db.from('tickets').select('id', head).gte('imported_at', sinceH(24)),
     db.from('users').select('id', head).gte('created_at', sinceH(24 * 7)),
+    db.from('pending_imports').select('id', head).eq('status', 'approved').gte('created_at', sinceH(24)),
+    db.from('pending_imports').select('id', head).eq('status', 'rejected').gte('created_at', sinceH(24)),
   ])
   return {
     users: users.count ?? 0, tickets: tickets.count ?? 0, photos: photos.count ?? 0,
     pending: pending.count ?? 0, imports24: imports24.count ?? 0, signups7d: signups7d.count ?? 0,
+    approved24: approved24.count ?? 0, rejected24: rejected24.count ?? 0,
   }
+}
+
+// Import pipeline health from the last 24h of reviews. A high reject rate is a real signal
+// (parser/classifier regressions); the pending backlog is shown but doesn't flip to warning.
+function pipelineCheck(snap: { approved24: number; rejected24: number; pending: number }): Check {
+  const reviewed = snap.approved24 + snap.rejected24
+  const rejectRate = reviewed > 0 ? Math.round((snap.rejected24 / reviewed) * 100) : 0
+  const detail = `${snap.approved24} approved / ${snap.rejected24} rejected (24h) · ${snap.pending.toLocaleString()} pending review`
+  if (reviewed >= 10 && rejectRate > 60) return { name: 'Import pipeline', status: 'warn', detail: `${rejectRate}% rejected in 24h — ${detail}` }
+  return { name: 'Import pipeline', status: 'ok', detail }
 }
 
 export default async function HealthPage() {
@@ -138,9 +152,11 @@ export default async function HealthPage() {
     detail: process.env[e.name] ? e.desc : `not set — ${e.desc} unavailable`,
   }))
 
+  const pipeline = pipelineCheck(snap)
+
   // Overall = worst of the runtime service checks; advisory warnings (env presence, and
   // mobile keys only when the bridge is up) can raise it to "degraded" but never "down".
-  const runtime = [dbCheck, authCheck, ...edgeChecks, bridgeCheck]
+  const runtime = [dbCheck, authCheck, pipeline, ...edgeChecks, bridgeCheck]
   const advisory = [...envChecks, ...(bridgeUp ? mobileChecks : [])]
   const overall: Status = runtime.some((c) => c.status === 'down') ? 'down'
     : runtime.some((c) => c.status === 'warn') || advisory.some((c) => c.status === 'warn') ? 'warn'
@@ -161,9 +177,12 @@ export default async function HealthPage() {
           </h1>
           <p className="text-[13px] text-salty-muted">Live status of the admin panel and the Salty app.</p>
         </div>
-        <p className="flex items-center gap-1.5 whitespace-nowrap text-[11.5px] text-salty-muted">
-          <RefreshCw className="h-3.5 w-3.5" /> Checked {new Date().toLocaleString()}
-        </p>
+        <div className="flex items-center gap-2">
+          <p className="flex items-center gap-1.5 whitespace-nowrap text-[11.5px] text-salty-muted">
+            <RefreshCw className="h-3.5 w-3.5" /> {new Date().toLocaleTimeString()}
+          </p>
+          <HealthRefresher seconds={30} />
+        </div>
       </div>
 
       {/* Overall banner */}
@@ -175,7 +194,7 @@ export default async function HealthPage() {
         </div>
       </div>
 
-      <CheckSection icon={Database} title="Core services" checks={[dbCheck, authCheck]} />
+      <CheckSection icon={Database} title="Core services" checks={[dbCheck, authCheck, pipeline]} />
       <CheckSection icon={Server} title="Edge functions" checks={edgeChecks} />
       <CheckSection
         icon={KeyRound}
