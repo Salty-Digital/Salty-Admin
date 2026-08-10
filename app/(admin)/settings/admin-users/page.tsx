@@ -1,6 +1,7 @@
 import { requireAdmin } from '@/lib/auth'
 import { createServiceClient } from '@/lib/supabase/server'
 import { AdminUsersClient } from './admin-users-client'
+import { LoginHistory } from './login-history'
 
 export default async function AdminUsersPage() {
   const admin = await requireAdmin(1)
@@ -25,6 +26,21 @@ export default async function AdminUsersPage() {
     invited_by_email: a.invited_by ? inviterMap[a.invited_by] : undefined,
   }))
 
+  // Recent login history — surfaces the ip/user-agent captured on every login (a security view).
+  const emailById = new Map((admins ?? []).map(a => [a.id, a.email]))
+  const { data: history } = await db
+    .from('admin_login_history')
+    .select('id, admin_id, ip_address, user_agent, created_at')
+    .order('created_at', { ascending: false })
+    .limit(40)
+  const loginRows = (history ?? []).map(h => ({
+    id: h.id,
+    admin_email: emailById.get(h.admin_id) ?? 'Unknown / removed',
+    ip_address: h.ip_address,
+    user_agent: h.user_agent,
+    created_at: h.created_at,
+  }))
+
   return (
     <div className="p-7 space-y-5">
       <div>
@@ -32,6 +48,8 @@ export default async function AdminUsersPage() {
         <p className="text-[13px] text-salty-muted">Manage who has access to this admin panel</p>
       </div>
       <AdminUsersClient rows={rows} currentAdminId={admin.id} />
+
+      <LoginHistory rows={loginRows} />
     </div>
   )
 }
