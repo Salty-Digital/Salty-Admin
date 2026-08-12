@@ -8,10 +8,11 @@ interface Props {
   defaultQ: string
   defaultZip: string
   defaultTier: string
+  defaultActivity: string
   tiers: string[]
 }
 
-export function UserSearch({ defaultQ, defaultZip, defaultTier, tiers }: Props) {
+export function UserSearch({ defaultQ, defaultZip, defaultTier, defaultActivity, tiers }: Props) {
   const router = useRouter()
   const pathname = usePathname()
   const [, start] = useTransition()
@@ -47,6 +48,11 @@ export function UserSearch({ defaultQ, defaultZip, defaultTier, tiers }: Props) 
       <select defaultValue={defaultTier} onChange={e => set('tier', e.target.value)} className={inputCls}>
         <option value="">All tiers</option>
         {tiers.map(t => <option key={t} value={t} className="capitalize">{t}</option>)}
+      </select>
+      <select defaultValue={defaultActivity} onChange={e => set('activity', e.target.value)} className={inputCls}>
+        <option value="">All activity</option>
+        <option value="active">Performed an action</option>
+        <option value="registered">Registered only</option>
       </select>
     </div>
   )

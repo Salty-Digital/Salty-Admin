@@ -4,6 +4,7 @@ import { createServiceClient } from '@/lib/supabase/server'
 import { createV2Client, isV2Configured } from '@/lib/supabase/v2'
 import { maskEmail } from '@/lib/privacy'
 import { sanitizeOrFilterTerm } from '@/lib/validate'
+import { parseActivity, fetchActorIds, applyActivityFilter } from '@/lib/userActivity'
 import { Badge } from '@/components/ui/badge'
 import { UserSearch } from './user-search'
 import { SortLink } from '@/components/ui/sortable'
@@ -11,7 +12,7 @@ import { ClickableRow } from '@/components/ui/clickable-row'
 import { ChevronRight, Download } from 'lucide-react'
 
 interface PageProps {
-  searchParams: Promise<{ q?: string; zip?: string; tier?: string; page?: string; sort?: string; dir?: string }>
+  searchParams: Promise<{ q?: string; zip?: string; tier?: string; activity?: string; page?: string; sort?: string; dir?: string }>
 }
 
 // Server-sortable columns → real DB columns (derived columns like Tickets aren't here).
@@ -42,7 +43,8 @@ function sourceBadge(src: 'team' | 'signup link' | 'external' | null) {
 
 export default async function UsersPage({ searchParams }: PageProps) {
   const admin = await requireAdmin()
-  const { q = '', zip = '', tier = '', page = '1', sort = '', dir = '' } = await searchParams
+  const { q = '', zip = '', tier = '', activity: activityRaw = '', page = '1', sort = '', dir = '' } = await searchParams
+  const activity = parseActivity(activityRaw)
   const pageNum = Math.max(1, parseInt(page))
   const offset  = (pageNum - 1) * PAGE_SIZE
   const sortCol = USER_SORT_COLS[sort] ?? 'created_at'
@@ -62,6 +64,7 @@ export default async function UsersPage({ searchParams }: PageProps) {
   }
   if (zip)  query = query.ilike('zip_code', `%${zip}%`)
   if (tier) query = query.eq('tier', tier)
+  if (activity) query = applyActivityFilter(query, activity, await fetchActorIds(db))
 
   const { data: users, count } = await query
   const totalPages = Math.ceil((count ?? 0) / PAGE_SIZE)
@@ -109,7 +112,7 @@ export default async function UsersPage({ searchParams }: PageProps) {
         </div>
         {admin.access_level <= 1 && (
           <a
-            href={`/api/export/users?q=${encodeURIComponent(q)}&zip=${encodeURIComponent(zip)}&tier=${encodeURIComponent(tier)}`}
+            href={`/api/export/users?q=${encodeURIComponent(q)}&zip=${encodeURIComponent(zip)}&tier=${encodeURIComponent(tier)}&activity=${encodeURIComponent(activity)}`}
             className="flex items-center gap-1.5 rounded-lg border border-salty-border bg-warm-white px-3 py-2 text-[12px] font-medium text-salty-secondary hover:bg-cream transition-colors"
           >
             <Download className="h-3.5 w-3.5" />
@@ -119,7 +122,7 @@ export default async function UsersPage({ searchParams }: PageProps) {
       </div>
 
       {/* Search + filters */}
-      <UserSearch defaultQ={q} defaultZip={zip} defaultTier={tier} tiers={TIERS} />
+      <UserSearch defaultQ={q} defaultZip={zip} defaultTier={tier} defaultActivity={activity} tiers={TIERS} />
 
       {/* Table */}
       <div className="overflow-hidden rounded-[14px] border border-salty-border bg-warm-white">
@@ -195,8 +198,8 @@ export default async function UsersPage({ searchParams }: PageProps) {
         <div className="flex items-center justify-between text-[13px] text-salty-muted">
           <span>Page {pageNum} of {totalPages}</span>
           <div className="flex gap-3">
-            {pageNum > 1 && <Link href={`/users?q=${q}&zip=${zip}&tier=${tier}&sort=${sort}&dir=${dir}&page=${pageNum-1}`} className="hover:text-ember">← Previous</Link>}
-            {pageNum < totalPages && <Link href={`/users?q=${q}&zip=${zip}&tier=${tier}&sort=${sort}&dir=${dir}&page=${pageNum+1}`} className="hover:text-ember">Next →</Link>}
+            {pageNum > 1 && <Link href={`/users?q=${q}&zip=${zip}&tier=${tier}&activity=${activity}&sort=${sort}&dir=${dir}&page=${pageNum-1}`} className="hover:text-ember">← Previous</Link>}
+            {pageNum < totalPages && <Link href={`/users?q=${q}&zip=${zip}&tier=${tier}&activity=${activity}&sort=${sort}&dir=${dir}&page=${pageNum+1}`} className="hover:text-ember">Next →</Link>}
           </div>
         </div>
       )}

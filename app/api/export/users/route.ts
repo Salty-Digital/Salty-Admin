@@ -3,6 +3,7 @@ import { requireAdmin, logAudit } from '@/lib/auth'
 import { createServiceClient } from '@/lib/supabase/server'
 import { maskEmail } from '@/lib/privacy'
 import { sanitizeOrFilterTerm } from '@/lib/validate'
+import { parseActivity, fetchActorIds, applyActivityFilter } from '@/lib/userActivity'
 
 export async function GET(req: NextRequest) {
   const admin = await requireAdmin(1)
@@ -10,6 +11,7 @@ export async function GET(req: NextRequest) {
   const q    = searchParams.get('q')    ?? ''
   const zip  = searchParams.get('zip')  ?? ''
   const tier = searchParams.get('tier') ?? ''
+  const activity = parseActivity(searchParams.get('activity'))
 
   const db = createServiceClient()
   let query = db
@@ -24,6 +26,7 @@ export async function GET(req: NextRequest) {
   }
   if (zip)  query = query.ilike('zip_code', `%${zip}%`)
   if (tier) query = query.eq('tier', tier)
+  if (activity) query = applyActivityFilter(query, activity, await fetchActorIds(db))
 
   const { data: users } = await query
 
@@ -52,7 +55,7 @@ export async function GET(req: NextRequest) {
 
   // Bulk PII export — always audited regardless of row count
   await logAudit(admin.id, 'export_users_csv', undefined, undefined, {
-    filters: { q, zip, tier },
+    filters: { q, zip, tier, activity },
     row_count: users?.length ?? 0,
   })
 
