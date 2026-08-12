@@ -44,7 +44,7 @@ export default async function UserDetailPage({ params }: PageProps) {
     db.from('friendships').select('requester_id, addressee_id, status').or(`requester_id.eq.${id},addressee_id.eq.${id}`),
     db.from('gmail_connections').select('email, last_synced_at, connected_at').eq('user_id', id).maybeSingle(),
     canViewImports
-      ? db.from('pending_imports').select('*').eq('user_id', id).order('created_at', { ascending: false }).limit(20)
+      ? db.from('pending_imports').select('*').eq('user_id', id).eq('status', 'pending').order('created_at', { ascending: false }).limit(20)
       : Promise.resolve({ data: [] }),
     db.from('feedback').select('id, category, rating, message, status, created_at').eq('user_id', id).order('created_at', { ascending: false }),
     // Count only — never fetch a user's photo URLs into the admin app.
