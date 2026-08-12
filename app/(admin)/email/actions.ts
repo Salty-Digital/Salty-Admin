@@ -5,6 +5,7 @@ import { createServiceClient } from '@/lib/supabase/server'
 import { assertUUID, assertString, assertEnum } from '@/lib/validate'
 import { sendBulkEmail, sendHtmlEmail } from '@/lib/email'
 import { renderBrandedEmail } from '@/lib/emails/branded'
+import { renderBetaInviteEmail } from '@/lib/emails/beta-invite'
 import { unsubscribeUrl, oneClickUnsubscribeUrl, betaUnsubscribeUrl, betaOneClickUnsubscribeUrl } from '@/lib/unsubscribe'
 import { createV2Client } from '@/lib/supabase/v2'
 
@@ -57,7 +58,7 @@ async function dropSuppressed<T extends { email: string }>(
 /** Resolve the list of recipient emails for a segment, excluding banned and unsubscribed users. */
 async function resolveRecipients(
   segment: Segment,
-): Promise<Array<{ id: string | null; email: string; betaId?: string }>> {
+): Promise<Array<{ id: string | null; email: string; betaId?: string; firstName?: string }>> {
   if (segment.type === 'custom') return resolveCustomRecipients(segment.emails)
   if (segment.type === 'beta') return resolveBetaRecipients(segment.betaStatus ?? 'all')
 
@@ -139,20 +140,23 @@ async function resolveCustomRecipients(
  * skipped; signed-up users additionally honor their main-DB ban / marketing-unsubscribe. Requires
  * the v2 database to be configured (throws V2NotConfiguredError otherwise).
  */
-async function resolveBetaRecipients(status: BetaStatus): Promise<Array<{ id: string | null; email: string; betaId?: string }>> {
+async function resolveBetaRecipients(status: BetaStatus): Promise<Array<{ id: string | null; email: string; betaId?: string; firstName?: string }>> {
   const PAGE = 1000
 
   // 1) Pull the (non-unsubscribed) beta signups from the v2 database, keeping each row's id
-  //    so waitlist recipients (no account) get a working per-address unsubscribe link.
+  //    (so waitlist recipients get a working unsubscribe link) and first name (for a
+  //    personalized greeting in the beta invite).
   const v2 = createV2Client()
-  const betaByEmail = new Map<string, string>() // email → beta_signups.id
+  const betaByEmail = new Map<string, { id: string; firstName?: string }>() // email → beta_signups row
   for (let page = 0; page < 60; page++) {
-    const { data, error } = await v2.from('beta_signups').select('id, email, unsubscribed_at').range(page * PAGE, page * PAGE + PAGE - 1)
+    const { data, error } = await v2.from('beta_signups').select('id, email, first_name, unsubscribed_at').range(page * PAGE, page * PAGE + PAGE - 1)
     if (error) throw new Error(error.message)
-    const rows = (data ?? []) as unknown as { id: string; email: string | null; unsubscribed_at: string | null }[]
+    const rows = (data ?? []) as unknown as { id: string; email: string | null; first_name: string | null; unsubscribed_at: string | null }[]
     for (const r of rows) {
       if (r.unsubscribed_at) continue
-      if (r.email && r.email.includes('@') && typeof r.id === 'string') betaByEmail.set(r.email.trim().toLowerCase(), r.id)
+      if (r.email && r.email.includes('@') && typeof r.id === 'string') {
+        betaByEmail.set(r.email.trim().toLowerCase(), { id: r.id, firstName: r.first_name?.trim() || undefined })
+      }
     }
     if (rows.length < PAGE) break
   }
@@ -176,16 +180,17 @@ async function resolveBetaRecipients(status: BetaStatus): Promise<Array<{ id: st
 
   // 3) Build recipients. Signed-up users use their main-account unsubscribe; waitlist-only
   //    recipients carry their beta_signups id so they get a beta unsubscribe link instead.
-  const recipients: Array<{ id: string | null; email: string; betaId?: string }> = []
-  for (const [email, betaId] of betaByEmail) {
+  //    The beta first name rides along for a personalized greeting.
+  const recipients: Array<{ id: string | null; email: string; betaId?: string; firstName?: string }> = []
+  for (const [email, beta] of betaByEmail) {
     const user = userByEmail.get(email)
     if (status === 'signed' && !user) continue
     if (status === 'unsigned' && user) continue
     if (user) {
       if (user.suppressed) continue
-      recipients.push({ id: user.id, email })
+      recipients.push({ id: user.id, email, firstName: beta.firstName })
     } else {
-      recipients.push({ id: null, email, betaId })
+      recipients.push({ id: null, email, betaId: beta.id, firstName: beta.firstName })
     }
   }
   return dropSuppressed(db, recipients)
@@ -281,7 +286,7 @@ export async function sendBroadcastAction(
     }
   })
 
-  const { sent, failed } = await sendBulkEmail(messages)
+  const { sent, failed, error } = await sendBulkEmail(messages)
 
   // Log the campaign — tolerate the table not existing yet (migration 007 not applied).
   const db = createServiceClient()
@@ -306,6 +311,85 @@ export async function sendBroadcastAction(
     sent,
     failed,
   })
+
+  // Everything failed — surface the real reason (e.g. bad Resend key) instead of a silent "0 sent".
+  if (sent === 0 && failed > 0) {
+    throw new Error(`All ${failed} emails failed to send${error ? ` — Resend: ${error}` : ''}. Check RESEND_API_KEY and the Resend dashboard.`)
+  }
+
+  return { sent, failed, recipients: recipients.length }
+}
+
+/**
+ * Send the pre-designed Salty beta invite (the full TestFlight + Google Play onboarding
+ * email) to a segment — typically Beta signups → "not signed up yet". Unlike the broadcast,
+ * there's no admin-typed body: the HTML is fixed and each recipient's first name (from the
+ * beta_signups waitlist) is merged into the greeting. Only the subject is editable.
+ */
+export async function sendBetaInviteAction(
+  subjectRaw: string,
+  segment: Segment,
+): Promise<{ sent: number; failed: number; recipients: number }> {
+  const admin = await requireAdmin(2)
+  const subject = assertString(subjectRaw, 'Subject', 200)
+  assertEnum(segment.type, ['all', 'tier', 'active', 'custom', 'beta'] as const, 'Segment')
+
+  const recipients = await resolveRecipients(segment)
+  if (recipients.length === 0) throw new Error('No recipients match this segment.')
+
+  const messages = recipients.map(recipient => {
+    // Prefer the main-account unsubscribe; waitlist-only recipients get a beta unsubscribe
+    // keyed by their beta_signups id. Bare custom addresses get neither.
+    const unsub = recipient.id ? unsubscribeUrl(recipient.id)
+      : recipient.betaId ? betaUnsubscribeUrl(recipient.betaId)
+        : undefined
+    const listUnsub = recipient.id ? oneClickUnsubscribeUrl(recipient.id)
+      : recipient.betaId ? betaOneClickUnsubscribeUrl(recipient.betaId)
+        : undefined
+    const rendered = renderBetaInviteEmail({ subject, firstName: recipient.firstName, unsubscribeUrl: unsub })
+    return {
+      to: recipient.email,
+      subject: rendered.subject,
+      html: rendered.html,
+      text: rendered.text,
+      ...(listUnsub ? { listUnsubscribeUrl: listUnsub } : {}),
+    }
+  })
+
+  const { sent, failed, error } = await sendBulkEmail(messages)
+
+  const storedSegment =
+    segment.type === 'custom' ? { type: 'custom', emailCount: recipients.length, template: 'beta-invite' }
+      : segment.type === 'beta' ? { type: 'beta', betaStatus: segment.betaStatus ?? 'all', recipientCount: recipients.length, template: 'beta-invite' }
+        : { ...segment, template: 'beta-invite' }
+
+  const db = createServiceClient()
+  try {
+    await db.from('email_campaigns').insert({
+      admin_id: admin.id,
+      subject,
+      body: '(Beta invite — pre-designed HTML template)',
+      segment: storedSegment,
+      recipient_count: recipients.length,
+      sent_count: sent,
+      failed_count: failed,
+    })
+  } catch {
+    // email_campaigns table not present — skip logging, the send already happened.
+  }
+
+  await logAudit(admin.id, 'send_beta_invite', 'email_campaign', undefined, {
+    subject,
+    segment: storedSegment,
+    recipients: recipients.length,
+    sent,
+    failed,
+  })
+
+  // Everything failed — surface the real reason (e.g. bad Resend key) instead of a silent "0 sent".
+  if (sent === 0 && failed > 0) {
+    throw new Error(`All ${failed} emails failed to send${error ? ` — Resend: ${error}` : ''}. Check RESEND_API_KEY and the Resend dashboard.`)
+  }
 
   return { sent, failed, recipients: recipients.length }
 }

@@ -78,7 +78,16 @@ export function CumulativeAreaChart({ data, label = 'Total signups', color = '#C
           </defs>
           <CartesianGrid strokeDasharray="3 3" className="stroke-muted" />
           <XAxis dataKey="day" tick={{ fontSize: 11 }} tickLine={false} axisLine={false} minTickGap={24} tickFormatter={dayTick} />
-          <YAxis tick={{ fontSize: 11 }} tickLine={false} axisLine={false} allowDecimals={false} width={money ? 52 : undefined} tickFormatter={money ? (v: number) => `$${v}` : undefined} />
+          {/* Only pass width/tickFormatter when they have real values. recharts builds its axis
+              map as {...YAxis.defaultProps, ...props}, so an explicit `width={undefined}` clobbers
+              the default (60) → the x-scale offset becomes NaN ("Received NaN for the x attribute"). */}
+          <YAxis
+            tick={{ fontSize: 11 }}
+            tickLine={false}
+            axisLine={false}
+            allowDecimals={false}
+            {...(money ? { width: 52, tickFormatter: (v: number) => `$${v}` } : {})}
+          />
           <Tooltip
             contentStyle={{ fontSize: 12 }}
             labelFormatter={(v: string) => new Date(v).toLocaleDateString()}

@@ -96,6 +96,21 @@ export async function sendHtmlEmail(
 export interface BulkResult {
   sent: number
   failed: number
+  /**
+   * The first Resend error encountered (e.g. "API key is invalid (401)"), if any.
+   * Surfaced so a wholesale failure shows a real reason instead of a silent count.
+   */
+  error?: string
+}
+
+/** Turn a Resend error object / thrown value into a short, loggable string. */
+function describeSendError(err: unknown): string {
+  if (err && typeof err === 'object') {
+    const e = err as { message?: string; statusCode?: number; name?: string }
+    const msg = e.message ?? e.name ?? 'Unknown send error'
+    return e.statusCode ? `${msg} (${e.statusCode})` : msg
+  }
+  return err instanceof Error ? err.message : String(err)
 }
 
 /**
@@ -109,6 +124,7 @@ export async function sendBulkEmail(
   const resend = getClient()
   let sent = 0
   let failed = 0
+  let firstError: string | undefined
 
   for (let i = 0; i < messages.length; i += 100) {
     const chunk = messages.slice(i, i + 100)
@@ -127,16 +143,19 @@ export async function sendBulkEmail(
       )
       if (error) {
         failed += chunk.length
+        firstError ??= describeSendError(error)
       } else {
         // batch returns one entry per accepted message
         const accepted = data?.data?.length ?? chunk.length
         sent += accepted
         failed += chunk.length - accepted
       }
-    } catch {
+    } catch (e) {
       failed += chunk.length
+      firstError ??= describeSendError(e)
     }
   }
 
-  return { sent, failed }
+  if (firstError) console.error('[sendBulkEmail] Resend send failed:', firstError)
+  return { sent, failed, error: firstError }
 }
