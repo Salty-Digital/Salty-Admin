@@ -91,30 +91,66 @@ const REPORT_EVENT_TOOL = {
   },
 } as const
 
-function buildPrompt(input: EventLookupInput): string {
+// The final score and attendance are NOT printed on a ticket (it's issued before the
+// event) and must come from the grounded box-score lookup, never this panel — so both
+// prompt branches tell the model to leave them empty.
+const SCORES_LINE =
+  'Do NOT fill home_score, away_score, or attendance — those are not on a ticket and a separate box-score lookup provides the exact result. Leave them empty.'
+
+function buildPrompt(input: EventLookupInput, hasImage: boolean): string {
   const parts = [`Event title: "${input.title}"`]
   if (input.date) parts.push(`Date: "${input.date}"`)
   if (input.venue) parts.push(`Venue: "${input.venue}"`)
   if (input.category) parts.push(`Category hint: "${input.category}"`)
+
+  if (hasImage) {
+    return [
+      "A photo of the user's physical ticket is attached. It is the PRIMARY source — read it directly.",
+      'The current record (which may be wrong or incomplete):',
+      parts.join('\n'),
+      'Report what THIS ticket actually shows via the report_event tool.',
+      'TRANSCRIBE EXACTLY what is printed on the ticket for every field that appears on it — title/matchup, performer, date, time, venue, city, and section/seat. Do not translate, reorder, abbreviate, expand, or "correct" printed text from outside knowledge; preserve the ticket\'s own wording (including the order of the two teams in a game). If a field is not printed or is not legible, leave it blank — never guess it.',
+      'You MAY use general knowledge ONLY for fields that are not printed on the ticket: a one-line description, a rough price range, 2–5 factual tags, and any notable people (theatre cast / opening acts).',
+      'For a sports game, fill the `sports` identity fields from the ticket and the matchup — home_team, away_team, league, sport, venue, city, season, status. ' + SCORES_LINE,
+      'Set known=false only if the image is not a readable ticket at all.',
+    ].join('\n')
+  }
+
   return [
-    'An admin is correcting and completing the details of a live-event ticket. Here is what is known:',
+    'An admin is correcting and completing the details of a live-event ticket. No ticket image is on file, so work from the text below plus your knowledge of the event. Here is what is known:',
     parts.join('\n'),
     'Report your best knowledge of THIS specific event via the report_event tool.',
-    'Fill EVERY field you can for this event, not just the title — time, a rough price range, a one-line description, and 2–5 factual tags. For a sports game, fill the `sports` object as fully as you can: both teams, the final score, sport, league, venue, city, season, and attendance if known (omit `sports` for non-game tickets like stadium tours).',
-    'Only fill a field when you are reasonably confident it is correct for this event. Use empty strings / an empty array for anything you do not know, and set known=false if you cannot identify the event at all. Never invent specifics — in particular, do not guess exact scores or attendance you are unsure of.',
+    'Fill EVERY field you can for this event, not just the title — time, a rough price range, a one-line description, and 2–5 factual tags. For a sports game, fill the `sports` identity fields you are confident about: both teams, sport, league, venue, city, season. ' + SCORES_LINE,
+    'Only fill a field when you are reasonably confident it is correct for this event. Use empty strings / an empty array for anything you do not know, and set known=false if you cannot identify the event at all. Never invent specifics.',
   ].join('\n')
+}
+
+export interface TicketImage {
+  /** base64-encoded image bytes, with no `data:` prefix */
+  data: string
+  /** e.g. 'image/jpeg', 'image/png', 'image/webp' */
+  mediaType: string
 }
 
 export async function aiEventLookup(
   input: EventLookupInput,
+  image?: TicketImage | null,
 ): Promise<{ ok: true; data: EventLookupResult } | { ok: false; error: string }> {
   const key = process.env.ANTHROPIC_API_KEY
   if (!key) {
     return { ok: false, error: 'ANTHROPIC_API_KEY is not set in the admin environment.' }
   }
-  if (!input.title?.trim()) return { ok: false, error: 'A title is required to search.' }
+  if (!input.title?.trim() && !image) return { ok: false, error: 'A title or ticket image is required to search.' }
 
   try {
+    // Attach the physical-ticket scan when we have one so the model transcribes the real
+    // ticket instead of recalling the event from the title alone.
+    const userContent = image
+      ? [
+          { type: 'image', source: { type: 'base64', media_type: image.mediaType, data: image.data } },
+          { type: 'text', text: buildPrompt(input, true) },
+        ]
+      : buildPrompt(input, false)
     const res = await fetch(ANTHROPIC_URL, {
       method: 'POST',
       headers: {
@@ -127,7 +163,7 @@ export async function aiEventLookup(
         max_tokens: 1024,
         tools: [REPORT_EVENT_TOOL],
         tool_choice: { type: 'tool', name: 'report_event' },
-        messages: [{ role: 'user', content: buildPrompt(input) }],
+        messages: [{ role: 'user', content: userContent }],
       }),
     })
     if (!res.ok) {
@@ -147,19 +183,22 @@ export async function aiEventLookup(
     const sp = p.sports
     const str = (v: unknown) => (v === null || v === undefined ? '' : String(v).trim())
     const sports =
-      sp && (sp.home_team || sp.away_team || sp.home_score != null || sp.away_score != null)
+      sp && (sp.home_team || sp.away_team)
         ? {
             home_team: str(sp.home_team),
             away_team: str(sp.away_team),
-            home_score: str(sp.home_score),
-            away_score: str(sp.away_score),
+            // Never surface a score/attendance from this panel — they aren't on a ticket and
+            // must come from the grounded box-score lookup ("Fetch exact result"). Force blank
+            // even if the model ignored the prompt and returned numbers.
+            home_score: '',
+            away_score: '',
             league: str(sp.league),
             status: str(sp.status),
             sport: str(sp.sport),
             venue: str(sp.venue),
             city: str(sp.city),
             season: str(sp.season),
-            attendance: str(sp.attendance),
+            attendance: '',
           }
         : null
     const tags = Array.isArray(p.tags)

@@ -5,7 +5,7 @@ import { requireAdmin, logAudit } from '@/lib/auth'
 import { createServiceClient, createEdgeFunctionClient } from '@/lib/supabase/server'
 import { assertUUID, assertString } from '@/lib/validate'
 import { TICKET_CATEGORIES } from '@/lib/categories'
-import { aiEventLookup, verifyTicketCategory, type EventLookupInput, type EventLookupResult, type CategoryVerifyInput } from '@/lib/anthropic'
+import { aiEventLookup, verifyTicketCategory, type EventLookupInput, type EventLookupResult, type CategoryVerifyInput, type TicketImage } from '@/lib/anthropic'
 
 type Result = { ok: true } | { ok: false; error: string }
 
@@ -15,6 +15,28 @@ function num(v: unknown): number | null {
   if (v === null || v === undefined || v === '') return null
   const n = Number(v)
   return Number.isFinite(n) ? n : null
+}
+
+// Download the user's original ticket scan (public ticket-photos bucket URL) so the AI
+// lookup can read the physical ticket instead of guessing from the title. Best-effort:
+// any failure — missing scan, network error, oversize, odd content-type — yields null and
+// the lookup falls back to a text-only search.
+async function fetchTicketImage(url: string): Promise<TicketImage | null> {
+  try {
+    const resp = await fetch(url, { signal: AbortSignal.timeout(8000) })
+    if (!resp.ok) return null
+    const ct = (resp.headers.get('content-type') ?? '').toLowerCase()
+    const mediaType = ct.includes('png') ? 'image/png'
+      : ct.includes('webp') ? 'image/webp'
+      : ct.includes('gif') ? 'image/gif'
+      : 'image/jpeg'
+    const buf = await resp.arrayBuffer()
+    // Anthropic rejects images over ~5MB; skip empty/oversize rather than erroring the lookup.
+    if (buf.byteLength === 0 || buf.byteLength > 5_000_000) return null
+    return { data: Buffer.from(buf).toString('base64'), mediaType }
+  } catch {
+    return null
+  }
 }
 
 async function ownerId(db: ReturnType<typeof createServiceClient>, ticketId: string): Promise<string | null> {
@@ -383,11 +405,25 @@ export async function markReviewedAction(ticketId: string, done: boolean, revali
 }
 
 // ── AI lookup — helps the admin fill fields; never writes anything itself ─────────
+// Reads the user's original ticket scan when one exists, so the model transcribes the
+// physical ticket rather than recalling the event from the title. `usedImage` tells the
+// UI whether an actual scan was read or it fell back to a text-only search.
 export async function aiLookupAction(
+  ticketId: string,
   input: EventLookupInput,
-): Promise<{ ok: true; data: EventLookupResult } | { ok: false; error: string }> {
-  await requireAdmin(2)
-  return aiEventLookup(input)
+): Promise<{ ok: true; data: EventLookupResult; usedImage: boolean } | { ok: false; error: string }> {
+  try {
+    await requireAdmin(2)
+    const tid = assertUUID(ticketId, 'Ticket ID')
+    const db = createServiceClient()
+    const { data: ticket } = await db.from('tickets').select('scan_image_url').eq('id', tid).maybeSingle()
+    const image = ticket?.scan_image_url ? await fetchTicketImage(ticket.scan_image_url) : null
+    const res = await aiEventLookup(input, image)
+    if (!res.ok) return res
+    return { ok: true, data: res.data, usedImage: !!image }
+  } catch (e) {
+    return { ok: false, error: (e as Error).message }
+  }
 }
 
 // ── Category check — verifies the category and suggests the right one on a mismatch ──

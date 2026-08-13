@@ -23,6 +23,7 @@ export interface TicketFull {
   ownerEmail: string | null
   ownerName: string | null
   imageUrl: string | null
+  scanImageUrl: string | null
   core: {
     title: string; original_title: string; venue_name: string; date_str: string; time_str: string
     seat: string; section: string; category: string; price_paid: string; price_currency: string
@@ -166,13 +167,15 @@ function AiPanel({
   const [pending, start] = useTransition()
   const [result, setResult] = useState<EventLookupResult | null>(null)
   const [err, setErr] = useState<string | null>(null)
+  const [usedImage, setUsedImage] = useState<boolean | null>(null)
 
   function run() {
     setErr(null)
     setResult(null)
+    setUsedImage(null)
     start(async () => {
-      const res = await aiLookupAction({ title: core.title, date: core.date_str, venue: core.venue_name, category: core.category })
-      if (res.ok) setResult(res.data)
+      const res = await aiLookupAction(ticket.id, { title: core.title, date: core.date_str, venue: core.venue_name, category: core.category })
+      if (res.ok) { setResult(res.data); setUsedImage(res.usedImage) }
       else setErr(res.error)
     })
   }
@@ -221,7 +224,7 @@ function AiPanel({
       <div className="flex items-center gap-2 border-b border-[#E6D9F2] px-5 py-3">
         <Sparkles className="h-4 w-4 text-[#7B44A8]" />
         <h2 className="font-sora text-[14px] font-bold text-salty-text">AI lookup</h2>
-        <span className="text-[11.5px] text-salty-muted">· fill fields from the event name</span>
+        <span className="text-[11.5px] text-salty-muted">· reads the original ticket scan</span>
         <button
           onClick={run}
           disabled={pending || !core.title.trim()}
@@ -233,7 +236,20 @@ function AiPanel({
       </div>
       <div className="p-5">
         {err && <p className="text-[12.5px] text-[#BF4A3A]">{err}</p>}
-        {!err && !result && <p className="text-[12.5px] text-salty-muted">Uses the title, date and venue above to look up the real event. Nothing is saved until you Apply a suggestion and then save the section.</p>}
+        {!err && !result && (
+          <p className="text-[12.5px] text-salty-muted">
+            {ticket.scanImageUrl
+              ? 'Reads the user’s original ticket scan and transcribes what’s printed on it (falling back to the title, date and venue above). A final score isn’t printed on a ticket — use “Fetch exact result” in the Sports section for that. Nothing is saved until you Apply a suggestion and save the section.'
+              : 'No original scan is on file for this ticket, so this uses the title, date and venue above only. Nothing is saved until you Apply a suggestion and save the section.'}
+          </p>
+        )}
+        {result && usedImage !== null && (
+          <p className={`mb-2 inline-flex items-center gap-1.5 text-[11.5px] font-medium ${usedImage ? 'text-[#3E8A5A]' : 'text-[#8A6830]'}`}>
+            {usedImage
+              ? <><Check className="h-3.5 w-3.5" /> Read from the original ticket scan</>
+              : <><AlertTriangle className="h-3.5 w-3.5" /> No scan on file — used the title text only</>}
+          </p>
+        )}
         {result && !result.known && suggestions.length === 0 && (
           <p className="text-[12.5px] text-salty-muted">The model couldn&apos;t confidently identify this event.</p>
         )}

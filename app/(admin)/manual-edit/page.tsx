@@ -334,7 +334,7 @@ async function Editor({ ticketId }: { ticketId: string }) {
 
   const { data: ticket } = await db
     .from('tickets')
-    .select('id, user_id, title, original_title, venue_name, date_str, time_str, seat, section, category, price_paid, price_currency, est_price, rating, status, image_url')
+    .select('id, user_id, title, original_title, venue_name, date_str, time_str, seat, section, category, price_paid, price_currency, est_price, rating, status, image_url, scan_image_url')
     .eq('id', ticketId)
     .single()
 
@@ -366,6 +366,7 @@ async function Editor({ ticketId }: { ticketId: string }) {
     ownerEmail: ownerRes.data?.email ?? null,
     ownerName: ownerRes.data?.display_name ?? null,
     imageUrl: ticket.image_url ?? null,
+    scanImageUrl: ticket.scan_image_url ?? null,
     core: {
       title: ticket.title ?? '',
       original_title: ticket.original_title ?? '',
