@@ -15,7 +15,7 @@ import { ResetPasswordButton } from './reset-password-button'
 import { ForceSignOutButton } from './force-signout-button'
 import { TierSelect } from './tier-select'
 import { BanUserDialog } from './ban-user-dialog'
-import { ArrowLeft } from 'lucide-react'
+import { ArrowLeft, ShieldCheck } from 'lucide-react'
 
 interface PageProps {
   params: Promise<{ id: string }>
@@ -36,6 +36,7 @@ export default async function UserDetailPage({ params }: PageProps) {
     { data: gmail },
     { data: pendingImports },
     { data: userFeedback },
+    { data: privacy },
     photosCountRes,
     authUserResult,
   ] = await Promise.all([
@@ -47,6 +48,7 @@ export default async function UserDetailPage({ params }: PageProps) {
       ? db.from('pending_imports').select('*').eq('user_id', id).eq('status', 'pending').order('created_at', { ascending: false }).limit(20)
       : Promise.resolve({ data: [] }),
     db.from('feedback').select('id, category, rating, message, status, created_at').eq('user_id', id).order('created_at', { ascending: false }),
+    db.from('privacy_settings').select('profile_visibility, share_events, allow_tagging, appear_in_search, share_event_photos, updated_at').eq('user_id', id).maybeSingle(),
     // Count only — never fetch a user's photo URLs into the admin app.
     db.from('photos').select('id', { count: 'exact', head: true }).eq('user_id', id),
     db.auth.admin.getUserById(id),
@@ -159,6 +161,26 @@ export default async function UserDetailPage({ params }: PageProps) {
             </div>
           ))}
         </div>
+      </div>
+
+      {/* Privacy & safety — read-only; explains visibility/tagging for support & moderation */}
+      <div className="rounded-[14px] border border-salty-border bg-warm-white p-5">
+        <div className="flex items-center gap-2 border-b border-salty-border pb-2">
+          <ShieldCheck className="h-4 w-4 text-ember" />
+          <h2 className="font-sora text-[13px] font-bold text-salty-text">Privacy &amp; safety</h2>
+          {privacy?.updated_at && <span className="text-[11px] text-salty-muted">· updated {new Date(privacy.updated_at).toLocaleDateString()}</span>}
+        </div>
+        {privacy ? (
+          <div className="mt-3 grid grid-cols-2 gap-x-6 gap-y-3 sm:grid-cols-3 lg:grid-cols-5">
+            <PrivacyStat label="Profile visibility" value={<span className="capitalize">{privacy.profile_visibility ?? 'default'}</span>} />
+            <PrivacyStat label="Share events" value={<Toggle on={privacy.share_events} />} />
+            <PrivacyStat label="Allow tagging" value={<Toggle on={privacy.allow_tagging} />} />
+            <PrivacyStat label="Appear in search" value={<Toggle on={privacy.appear_in_search} />} />
+            <PrivacyStat label="Share event photos" value={<Toggle on={privacy.share_event_photos} />} />
+          </div>
+        ) : (
+          <p className="mt-3 text-[13px] text-salty-muted">No custom privacy settings saved — the app is using its defaults for this user.</p>
+        )}
       </div>
 
       {/* Actions */}
@@ -328,6 +350,20 @@ function InfoRow({ label, value }: { label: string; value: React.ReactNode }) {
     <div className="flex items-start justify-between gap-4">
       <span className="text-[13px] text-salty-muted shrink-0">{label}</span>
       <span className="text-[13px] text-right text-salty-text">{value}</span>
+    </div>
+  )
+}
+
+function Toggle({ on }: { on: boolean | null }) {
+  if (on == null) return <span className="text-salty-muted">default</span>
+  return <span className={on ? 'font-medium text-[#3E8A5A]' : 'text-salty-muted'}>{on ? 'On' : 'Off'}</span>
+}
+
+function PrivacyStat({ label, value }: { label: string; value: React.ReactNode }) {
+  return (
+    <div>
+      <p className="text-[10.5px] font-semibold uppercase tracking-[0.06em] text-salty-muted">{label}</p>
+      <p className="mt-0.5 text-[13.5px] text-salty-text">{value}</p>
     </div>
   )
 }

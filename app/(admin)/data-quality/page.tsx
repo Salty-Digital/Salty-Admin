@@ -1,8 +1,11 @@
 import Link from 'next/link'
-import { GaugeCircle, ShieldCheck, Sparkles, PieChart } from 'lucide-react'
+import { GaugeCircle, ShieldCheck, Sparkles, PieChart, Fingerprint, CheckCircle2, AlertTriangle, XCircle } from 'lucide-react'
 import { requireAdmin } from '@/lib/auth'
 import { createServiceClient } from '@/lib/supabase/server'
 import { CATEGORY_LABELS } from '@/lib/categories'
+import { isStrongKey } from '@/lib/events'
+import { RunReconcileButton } from '../enrichment/pipeline-actions'
+import { ResolveTicketButton, ClearStrongIdButton } from './integrity-buttons'
 
 export const dynamic = 'force-dynamic'
 
@@ -16,17 +19,21 @@ function isPastDate(dateStr: string | null): boolean {
   return Date.UTC(d.getFullYear(), d.getMonth(), d.getDate()) < Date.UTC(now.getFullYear(), now.getMonth(), now.getDate())
 }
 
-interface T { id: string; category: string; title: string | null; venue_name: string | null; date_str: string | null; confidence: number | null }
+interface T { id: string; category: string; title: string | null; venue_name: string | null; date_str: string | null; confidence: number | null; event_id: string | null; status: string | null }
+interface EventLite { id: string; name: string | null; event_key: string | null; merged_into: string | null; setlistfm_id: string | null; sport_api_id: string | null; phishnet_show_id: string | null }
 
 export default async function DataQualityPage() {
-  await requireAdmin(3)
+  const admin = await requireAdmin(3)
+  const canAct = admin.access_level <= 2
   const db = createServiceClient()
 
-  const [ticketsRes, castRes, setlistRes, sportsRes] = await Promise.all([
-    db.from('tickets').select('id, category, title, venue_name, date_str, confidence').limit(20000),
+  const [ticketsRes, castRes, setlistRes, sportsRes, eventsRes, setlistArtistRes] = await Promise.all([
+    db.from('tickets').select('id, category, title, venue_name, date_str, confidence, event_id, status').limit(20000),
     db.from('ticket_cast').select('ticket_id').limit(20000),
     db.from('setlists').select('ticket_id').limit(20000),
     db.from('sports_stats').select('ticket_id, status').limit(20000),
+    db.from('events').select('id, name, event_key, merged_into, setlistfm_id, sport_api_id, phishnet_show_id').limit(50000),
+    db.from('setlists').select('ticket_id, artist').not('artist', 'is', null).limit(20000),
   ])
   const tickets = (ticketsRes.data ?? []) as T[]
   const cast = new Set((castRes.data ?? []).map((r) => r.ticket_id))
@@ -69,6 +76,65 @@ export default async function DataQualityPage() {
   for (const t of tickets) byCat.set(t.category, (byCat.get(t.category) ?? 0) + 1)
   const cats = [...byCat.entries()].sort((a, b) => b[1] - a[1])
 
+  // ── Identity integrity — the canonical-event layer ──
+  const allEvents = (eventsRes.data ?? []) as EventLite[]
+  const canonicalEvents = allEvents.filter((e) => !e.merged_into)
+  const eventIdSet = new Set(allEvents.map((e) => e.id))
+
+  // Corrupt strong ids — one strong id claimed by >1 canonical event (the false-merge bug).
+  const STRONG_FIELDS = [
+    { key: 'setlistfm_id' as const, label: 'setlist.fm' },
+    { key: 'sport_api_id' as const, label: 'Sports API' },
+    { key: 'phishnet_show_id' as const, label: 'Phish.net' },
+  ]
+  const corrupt: { field: string; label: string; value: string; events: EventLite[] }[] = []
+  for (const { key, label } of STRONG_FIELDS) {
+    const groups = new Map<string, EventLite[]>()
+    for (const e of canonicalEvents) {
+      const v = e[key]
+      if (!v) continue
+      const arr = groups.get(v) ?? []
+      arr.push(e)
+      groups.set(v, arr)
+    }
+    for (const [value, evs] of groups) if (evs.length > 1) corrupt.push({ field: key, label, value, events: evs })
+  }
+  const corruptEventCount = corrupt.reduce((n, c) => n + c.events.length, 0)
+
+  // Reconcile candidates — a fuzzy event_key while a trusted strong id is already present.
+  const reconcileCandidates = canonicalEvents.filter(
+    (e) => !isStrongKey(e.event_key) && (e.setlistfm_id || e.sport_api_id || e.phishnet_show_id),
+  )
+
+  // Unresolved active tickets & dangling links.
+  const unresolved = tickets.filter((t) => t.status === 'active' && !t.event_id)
+  const dangling = tickets.filter((t) => t.event_id && !eventIdSet.has(t.event_id))
+  const mergedCount = allEvents.length - canonicalEvents.length
+
+  // Wrong-artist setlists — a setlist whose artist doesn't match its ticket title.
+  // Grouped per ticket (a ticket can have several setlist rows). Multi-act tickets
+  // (festivals) legitimately carry many non-matching artists, so those are dropped as
+  // noise — a true wrong-attach is a single/dual-artist concert whose one setlist is off.
+  const titleById = new Map(tickets.map((t) => [t.id, t.title]))
+  const norm = (s: string) => s.toLowerCase().replace(/[^a-z0-9]+/g, '')
+  const tokenize = (s: string) => s.toLowerCase().split(/[^a-z0-9]+/).filter((w) => w.length > 2)
+  const wrongByTicket = new Map<string, { title: string; artists: Set<string> }>()
+  for (const row of (setlistArtistRes.data ?? []) as { ticket_id: string; artist: string | null }[]) {
+    const artist = row.artist?.trim()
+    const title = titleById.get(row.ticket_id)
+    if (!artist || !title) continue
+    const nt = norm(title), na = norm(artist)
+    if (!na || !nt || nt.includes(na) || na.includes(nt)) continue
+    const tset = new Set(tokenize(title))
+    if (tokenize(artist).some((w) => tset.has(w))) continue
+    const e = wrongByTicket.get(row.ticket_id) ?? { title, artists: new Set<string>() }
+    e.artists.add(artist)
+    wrongByTicket.set(row.ticket_id, e)
+  }
+  const wrongArtist = [...wrongByTicket.entries()]
+    .filter(([, e]) => e.artists.size <= 2)
+    .map(([ticket_id, e]) => ({ ticket_id, title: e.title, artist: [...e.artists].join(', ') }))
+
   const pct = (n: number, d: number) => (d > 0 ? Math.round((n / d) * 100) : 0)
 
   return (
@@ -89,6 +155,79 @@ export default async function DataQualityPage() {
         <QualityCard label="Categorised" pct={pct(categorised, total)} sub={`${(tickets.length - categorised).toLocaleString()} still “other”`} href="/manual-edit?flag=uncategorised" />
         <QualityCard label="Confident" pct={pct(confident, total)} sub={`${conf.low.toLocaleString()} below 50%`} />
         <QualityCard label="Tickets" raw={tickets.length} sub="total in the system" />
+      </div>
+
+      {/* Identity integrity — the canonical-event layer */}
+      <div className="overflow-hidden rounded-[14px] border border-salty-border bg-warm-white">
+        <div className="flex items-center gap-2 border-b border-salty-border px-5 py-3">
+          <Fingerprint className="h-4 w-4 text-ember" />
+          <h2 className="font-sora text-[14px] font-bold text-salty-text">Identity integrity</h2>
+          <span className="text-[11.5px] text-salty-muted">· the canonical-event layer tickets collapse into ({canonicalEvents.length.toLocaleString()} events)</span>
+          {canAct && (corrupt.length > 0 || reconcileCandidates.length > 0) && <div className="ml-auto"><RunReconcileButton /></div>}
+        </div>
+
+        <IntegrityRow name="Corrupt strong IDs" desc="one strong id claimed by more than one canonical event — the false-merge bug" count={corruptEventCount} level={corrupt.length ? 'issue' : 'clean'}>
+          {corrupt.length > 0 && (
+            <div className="space-y-2">
+              {corrupt.map((c) => (
+                <div key={c.field + c.value} className="rounded-lg border border-salty-border bg-cream px-3 py-2">
+                  <p className="text-[12px] text-salty-secondary"><span className="font-semibold text-salty-text">{c.label}</span> <span className="font-mono">{c.value}</span> shared by {c.events.length} events:</p>
+                  <div className="mt-1.5 space-y-1">
+                    {c.events.map((e) => (
+                      <div key={e.id} className="flex items-center justify-between gap-2">
+                        <Link href={`/events/canonical/${e.id}`} className="truncate text-[12px] text-salty-secondary hover:text-ember hover:underline">{e.name ?? e.id.slice(0, 8)}</Link>
+                        {canAct && <ClearStrongIdButton eventId={e.id} field={c.field} />}
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </IntegrityRow>
+
+        <IntegrityRow name="Reconcile candidates" desc="a fuzzy title·date key while a trusted strong id already exists" count={reconcileCandidates.length} level={reconcileCandidates.length ? 'warn' : 'clean'} action={canAct && reconcileCandidates.length > 0 ? <RunReconcileButton /> : undefined}>
+          {reconcileCandidates.length > 0 && (
+            <ul className="space-y-1">
+              {reconcileCandidates.slice(0, 10).map((e) => (
+                <li key={e.id} className="flex items-center gap-2">
+                  <Link href={`/events/canonical/${e.id}`} className="truncate text-[12px] text-salty-secondary hover:text-ember hover:underline">{e.name ?? e.id.slice(0, 8)}</Link>
+                  <span className="font-mono text-[11px] text-salty-muted">{e.event_key ?? 'no key'}</span>
+                </li>
+              ))}
+            </ul>
+          )}
+        </IntegrityRow>
+
+        <IntegrityRow name="Unresolved active tickets" desc="active tickets linked to no canonical event" count={unresolved.length} level={unresolved.length ? 'warn' : 'clean'}>
+          {unresolved.length > 0 && (
+            <div className="space-y-1">
+              {unresolved.slice(0, 20).map((t) => (
+                <div key={t.id} className="flex items-center justify-between gap-2">
+                  <span className="truncate text-[12px] text-salty-secondary">{t.title ?? t.id.slice(0, 8)}</span>
+                  {canAct && <ResolveTicketButton ticketId={t.id} />}
+                </div>
+              ))}
+            </div>
+          )}
+        </IntegrityRow>
+
+        <IntegrityRow name="Dangling event links" desc="ticket.event_id points at a missing event — should be 0" count={dangling.length} level={dangling.length ? 'issue' : 'clean'} />
+
+        <IntegrityRow name="Wrong-artist setlists" desc="a setlist whose artist doesn't match its ticket title" count={wrongArtist.length} level={wrongArtist.length ? 'warn' : 'clean'}>
+          {wrongArtist.length > 0 && (
+            <div className="space-y-1">
+              {wrongArtist.slice(0, 20).map((w) => (
+                <div key={w.ticket_id} className="flex items-center justify-between gap-2 text-[12px]">
+                  <span className="truncate text-salty-secondary"><span className="font-medium text-salty-text">{w.artist}</span> on “{w.title}”</span>
+                  <Link href={`/manual-edit?ticket=${w.ticket_id}`} className="shrink-0 text-ember hover:underline">Review</Link>
+                </div>
+              ))}
+            </div>
+          )}
+        </IntegrityRow>
+
+        <IntegrityRow name="Merged events" desc="duplicates folded into a survivor, kept for history" count={mergedCount} level="info" action={mergedCount > 0 ? <Link href="/events?merged=1" className="text-[12px] font-medium text-ember hover:underline">View survivors</Link> : undefined} />
       </div>
 
       <Panel icon={Sparkles} title="Enrichment completeness" hint="of the events that should have it">
@@ -163,4 +302,33 @@ function Bar({ label, value, total, color, right, href }: { label: string; value
   return href
     ? <Link href={href} className={`${cls} transition-colors hover:bg-cream`}>{content}</Link>
     : <div className={cls}>{content}</div>
+}
+
+type IntegrityLevel = 'clean' | 'warn' | 'issue' | 'info'
+const INTEGRITY_META: Record<IntegrityLevel, { pill: string; icon: React.ElementType | null; label: string }> = {
+  clean: { pill: 'border-[#B8D9C5] bg-[#EAF4EE] text-[#3E8A5A]', icon: CheckCircle2, label: 'Clean' },
+  warn:  { pill: 'border-[#EAD9A6] bg-[#FFF8E6] text-[#8A6830]', icon: AlertTriangle, label: 'Review' },
+  issue: { pill: 'border-[#EBB9B0] bg-[#FDEDED] text-[#BF4A3A]', icon: XCircle, label: 'Issue' },
+  info:  { pill: 'border-salty-border bg-stone text-salty-secondary', icon: null, label: 'Info' },
+}
+
+function IntegrityRow({ name, desc, count, level, action, children }: { name: string; desc: string; count: number; level: IntegrityLevel; action?: React.ReactNode; children?: React.ReactNode }) {
+  const meta = INTEGRITY_META[level]
+  const Icon = meta.icon
+  return (
+    <div className="border-b border-salty-border px-5 py-3 last:border-0">
+      <div className="flex items-center gap-3">
+        <div className="min-w-0 flex-1">
+          <p className="text-[13px] font-medium text-salty-text">{name}</p>
+          <p className="text-[11.5px] text-salty-muted">{desc}</p>
+        </div>
+        <span className="font-sora text-[16px] font-bold tabular-nums text-salty-text">{count.toLocaleString()}</span>
+        <span className={`inline-flex shrink-0 items-center gap-1 rounded-md border px-2 py-0.5 text-[11px] font-semibold ${meta.pill}`}>
+          {Icon && <Icon className="h-3 w-3" />} {meta.label}
+        </span>
+        {action && <div className="shrink-0">{action}</div>}
+      </div>
+      {children && <div className="mt-2.5">{children}</div>}
+    </div>
+  )
 }

@@ -8,6 +8,7 @@ import {
   ChevronRight, LogOut, Wifi, Activity, ShieldAlert, MessageSquare,
   MailPlus, MailX, Sparkles, ScanLine, Music, Heart, Compass, Image as ImageIcon, Rocket, LineChart,
   Smartphone, Gauge, Inbox, UserCheck, KeyRound, ToggleLeft, SquarePen, HeartPulse, BadgeCheck,
+  CalendarClock,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { useAdmin } from './admin-provider'
@@ -56,12 +57,14 @@ const NAV_SECTIONS: NavSection[] = [
       { href: '/pending-imports',   label: 'Imports',          icon: Mail,     maxLevel: 2, countVariant: 'ember' },
       { href: '/gmail-connections', label: 'Email Connections', icon: Wifi,   maxLevel: 2 },
       { href: '/photo-scans',       label: 'Photo Scans',      icon: ScanLine, maxLevel: 3 },
+      { href: '/events',            label: 'Events',           icon: CalendarClock, maxLevel: 3 },
       { href: '/enrichment',        label: 'Enrichment',       icon: Music,    maxLevel: 3 },
       { href: '/data-quality',      label: 'Data Quality',     icon: BadgeCheck, maxLevel: 3 },
       { href: '/photos',            label: 'Photos',           icon: ImageIcon, maxLevel: 3 },
       { href: '/feedback',          label: 'Feedback',         icon: Inbox,    maxLevel: 3 },
       { href: '/notifications',     label: 'Notifications',    icon: Bell,     maxLevel: 3 },
       { href: '/support-chat',      label: 'Support Chat',     icon: MessageSquare, maxLevel: 3, countVariant: 'ember' },
+      { href: '/moderation',        label: 'Safety',           icon: ShieldAlert, maxLevel: 3 },
     ],
   },
   {

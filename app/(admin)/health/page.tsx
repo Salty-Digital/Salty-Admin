@@ -1,7 +1,7 @@
 import Link from 'next/link'
 import {
   HeartPulse, Database, Server, KeyRound, Boxes, Smartphone,
-  CheckCircle2, AlertTriangle, XCircle, RefreshCw,
+  CheckCircle2, AlertTriangle, XCircle, RefreshCw, ScanLine,
 } from 'lucide-react'
 import { requireAdmin } from '@/lib/auth'
 import { createServiceClient } from '@/lib/supabase/server'
@@ -108,6 +108,41 @@ async function loadSnapshot(db: Db) {
   }
 }
 
+// Scan-run ingestion telemetry (last 7d): the funnel from listed → accepted, the outcome
+// mix (most scheduled sweeps are no_connection/imap_connect_failed and expected), and the
+// current enrichment backlog. Aggregated in JS — the window is a few hundred rows.
+const OUTCOME_LABEL: Record<string, string> = {
+  ok: 'OK', no_connection: 'No connection', imap_connect_failed: 'IMAP connect failed',
+  error: 'Error', empty: 'Empty', partial: 'Partial',
+}
+async function loadIngestion(db: Db) {
+  const since7d = new Date(Date.now() - 7 * 86_400_000).toISOString()
+  const [runsRes, pendingRes, failedRes] = await Promise.all([
+    db.from('scan_runs').select('outcome, listed, fetched, passed_filter, accepted, non_ticket, fetch_failed').gte('started_at', since7d).limit(5000),
+    db.from('enrichment_jobs').select('ticket_id', { count: 'exact', head: true }).eq('status', 'pending'),
+    db.from('enrichment_jobs').select('ticket_id', { count: 'exact', head: true }).eq('status', 'failed'),
+  ])
+  const rows = (runsRes.data ?? []) as { outcome: string | null; listed: number | null; fetched: number | null; passed_filter: number | null; accepted: number | null; non_ticket: number | null; fetch_failed: number | null }[]
+  const outcomes = new Map<string, number>()
+  const funnel = { listed: 0, fetched: 0, passed_filter: 0, accepted: 0, non_ticket: 0, fetch_failed: 0 }
+  for (const r of rows) {
+    outcomes.set(r.outcome ?? 'unknown', (outcomes.get(r.outcome ?? 'unknown') ?? 0) + 1)
+    funnel.listed += r.listed ?? 0
+    funnel.fetched += r.fetched ?? 0
+    funnel.passed_filter += r.passed_filter ?? 0
+    funnel.accepted += r.accepted ?? 0
+    funnel.non_ticket += r.non_ticket ?? 0
+    funnel.fetch_failed += r.fetch_failed ?? 0
+  }
+  return {
+    runCount: rows.length,
+    outcomes: [...outcomes.entries()].sort((a, b) => b[1] - a[1]),
+    funnel,
+    enrichPending: pendingRes.count ?? 0,
+    enrichFailed: failedRes.count ?? 0,
+  }
+}
+
 // Import pipeline health from the last 24h of reviews. A high reject rate is a real signal
 // (parser/classifier regressions); the pending backlog is shown but doesn't flip to warning.
 function pipelineCheck(snap: { approved24: number; rejected24: number; pending: number }): Check {
@@ -124,12 +159,13 @@ export default async function HealthPage() {
   const url = process.env.NEXT_PUBLIC_SUPABASE_URL
   const anon = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY
 
-  const [dbCheck, authCheck, mobile, edgeChecks, snap] = await Promise.all([
+  const [dbCheck, authCheck, mobile, edgeChecks, snap, ingestion] = await Promise.all([
     checkDatabase(db),
     checkAuth(db),
     loadMobile(),
     Promise.all(EDGE_FUNCTIONS.map((n) => pingEdge(n, url, anon))),
     loadSnapshot(db),
+    loadIngestion(db),
   ])
 
   const bridgeCheck: Check = !mobile.configured
@@ -229,6 +265,65 @@ export default async function HealthPage() {
               <p className="mt-1 font-sora text-[22px] font-bold text-salty-text">{s.value.toLocaleString()}</p>
             </div>
           ))}
+        </div>
+      </div>
+
+      {/* Scan runs & ingestion */}
+      <div className="overflow-hidden rounded-[14px] border border-salty-border bg-warm-white">
+        <div className="flex items-center gap-2 border-b border-salty-border px-5 py-3">
+          <ScanLine className="h-4 w-4 text-ember" />
+          <h2 className="font-sora text-[14px] font-bold text-salty-text">Scan runs &amp; ingestion</h2>
+          <span className="text-[11.5px] text-salty-muted">· last 7 days · {ingestion.runCount.toLocaleString()} runs</span>
+          <Link href="/enrichment?tab=pipeline" className="ml-auto text-[12px] font-medium text-ember hover:underline">Enrichment pipeline →</Link>
+        </div>
+        {/* Funnel: listed → accepted */}
+        <div className="grid grid-cols-2 gap-px bg-salty-border sm:grid-cols-3 lg:grid-cols-6">
+          {[
+            { label: 'Listed', value: ingestion.funnel.listed },
+            { label: 'Fetched', value: ingestion.funnel.fetched },
+            { label: 'Passed filter', value: ingestion.funnel.passed_filter },
+            { label: 'Accepted', value: ingestion.funnel.accepted, tone: 'good' as const },
+            { label: 'Non-ticket', value: ingestion.funnel.non_ticket },
+            { label: 'Fetch failed', value: ingestion.funnel.fetch_failed, tone: ingestion.funnel.fetch_failed > 0 ? ('bad' as const) : undefined },
+          ].map((s) => (
+            <div key={s.label} className="bg-warm-white p-4">
+              <p className="text-[11px] font-semibold uppercase tracking-[0.05em] text-salty-muted">{s.label}</p>
+              <p className={`mt-1 font-sora text-[20px] font-bold ${s.tone === 'bad' ? 'text-[#BF4A3A]' : s.tone === 'good' ? 'text-[#3E8A5A]' : 'text-salty-text'}`}>{s.value.toLocaleString()}</p>
+            </div>
+          ))}
+        </div>
+        {/* Outcomes + enrichment backlog */}
+        <div className="grid gap-px border-t border-salty-border bg-salty-border sm:grid-cols-2">
+          <div className="bg-warm-white p-5">
+            <p className="mb-2 text-[11px] font-semibold uppercase tracking-[0.06em] text-salty-muted">Run outcomes</p>
+            {ingestion.outcomes.length === 0 ? (
+              <p className="text-[12.5px] text-salty-muted">No scan runs in the window.</p>
+            ) : (
+              <div className="space-y-1.5">
+                {ingestion.outcomes.map(([o, n]) => (
+                  <div key={o} className="flex items-center justify-between text-[12.5px]">
+                    <span className={o === 'ok' ? 'font-medium text-[#3E8A5A]' : o === 'error' ? 'text-[#BF4A3A]' : 'text-salty-secondary'}>{OUTCOME_LABEL[o] ?? o}</span>
+                    <span className="font-semibold tabular-nums text-salty-text">{n.toLocaleString()}</span>
+                  </div>
+                ))}
+                <p className="pt-1.5 text-[11px] text-salty-muted">“No connection” / “IMAP connect failed” are scheduled sweeps for users without a linked inbox — expected, not errors.</p>
+              </div>
+            )}
+          </div>
+          <div className="bg-warm-white p-5">
+            <p className="mb-2 text-[11px] font-semibold uppercase tracking-[0.06em] text-salty-muted">Enrichment backlog</p>
+            <div className="flex gap-8">
+              <div>
+                <p className="font-sora text-[22px] font-bold text-salty-text">{ingestion.enrichPending.toLocaleString()}</p>
+                <p className="text-[11px] text-salty-muted">pending</p>
+              </div>
+              <div>
+                <p className={`font-sora text-[22px] font-bold ${ingestion.enrichFailed > 0 ? 'text-[#BF4A3A]' : 'text-salty-text'}`}>{ingestion.enrichFailed.toLocaleString()}</p>
+                <p className="text-[11px] text-salty-muted">failed</p>
+              </div>
+            </div>
+            <p className="mt-3 text-[11.5px] text-salty-muted">Retry failed jobs on the <Link href="/enrichment?tab=pipeline" className="font-medium text-ember hover:underline">pipeline</Link>.</p>
+          </div>
         </div>
       </div>
     </div>
