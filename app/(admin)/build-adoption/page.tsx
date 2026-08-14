@@ -6,11 +6,17 @@ import { Apple, Smartphone } from 'lucide-react'
 // Active-user window the distribution is computed over.
 const WINDOW_DAYS = 30
 
+// Only the real installed app counts. Sessions run through Expo Go during development report
+// the Expo Go *client's* own identity — namespace host.exp.exponent / host.exp.Exponent and
+// its build number (417 on Android, 1017756 on iOS) — not Salty's. Those bogus "builds" sit
+// far ahead of the real latest and get mislabelled "on latest". Filtering by the app's own
+// bundle id drops both, regardless of build number (the old numeric cap only caught iOS's).
+const APP_NAMESPACE = 'ai.saltydigital.app'
+
 // Per-PERSON current build (build on their most recent event) + the person's distinct_ids
 // and last_seen, so the page can resolve the person to a real Supabase user and count one
 // current build per UNIQUE user. Counting persons directly would inflate the tester numbers
-// past the real user base (anonymous / pre-login sessions are their own persons). Junk build
-// numbers (a stray 1017756 appears in the data) are filtered to a sane range.
+// past the real user base (anonymous / pre-login sessions are their own persons).
 const ADOPTION_SQL = `
 SELECT
   person_id,
@@ -21,7 +27,7 @@ SELECT
 FROM events
 WHERE timestamp >= now() - INTERVAL ${WINDOW_DAYS} DAY
   AND properties.$app_build IS NOT NULL
-  AND toInt(properties.$app_build) BETWEEN 1 AND 100000
+  AND properties.$app_namespace = '${APP_NAMESPACE}'
 GROUP BY person_id
 ORDER BY last_seen DESC
 LIMIT 500
