@@ -38,20 +38,50 @@ export const RUNBOOKS: Runbook[] = [
   {
     action: 'retry_failed_enrichment_jobs',
     description:
-      'Requeue every failed enrichment job (status failed → pending, clears last_error). ' +
-      'Safe and idempotent: the worker re-attempts them on its normal schedule, and jobs ' +
-      'that fail again simply return to failed.',
+      'Requeue failed enrichment jobs that still have retries left (status failed → pending, ' +
+      'clears last_error). Jobs past max_attempts are left alone — their input is bad, so a ' +
+      'retry reproduces the identical failure.',
     appliesTo: (name) => name === 'Enrichment backlog',
     run: async () => {
       const db = createServiceClient()
-      // Same shape as the manual "Retry all failed" button on /enrichment.
+
+      // Only jobs with retries remaining. PostgREST can't compare two columns, so partition
+      // client-side — the failed set is small by construction.
+      //
+      // This guard is load-bearing, not defensive. Requeuing exhausted jobs sends them
+      // straight back through the worker to fail again, which drops the failure count below
+      // the alert threshold just long enough to fire a "recovered" email before the count
+      // climbs back. That is an alert-flap loop, and it is exactly what happened on
+      // 2026-08-15 with 36 geocode jobs sitting at attempts 5-6 of 4.
+      const { data: failed, error: readErr } = await db
+        .from('enrichment_jobs')
+        .select('ticket_id, kind, attempts, max_attempts')
+        .eq('status', 'failed')
+        .limit(1000)
+      if (readErr) return { ok: false, detail: readErr.message }
+
+      const rows = failed ?? []
+      const retryable = rows.filter((r) => (r.attempts ?? 0) < (r.max_attempts ?? 0))
+      const exhausted = rows.length - retryable.length
+
+      if (retryable.length === 0) {
+        return {
+          ok: false,
+          detail:
+            `nothing to retry — all ${rows.length} failed job(s) are past max_attempts. ` +
+            `These need a data fix (unresolvable venue strings), not a retry.`,
+        }
+      }
+
       const { data, error } = await db
         .from('enrichment_jobs')
         .update({ status: 'pending', next_attempt_at: new Date().toISOString(), last_error: null })
         .eq('status', 'failed')
+        .in('ticket_id', retryable.map((r) => r.ticket_id))
         .select('ticket_id')
       if (error) return { ok: false, detail: error.message }
-      return { ok: true, detail: `requeued ${(data ?? []).length} failed job(s)` }
+      const suffix = exhausted ? `; left ${exhausted} dead-lettered job(s) alone` : ''
+      return { ok: true, detail: `requeued ${(data ?? []).length} retryable job(s)${suffix}` }
     },
   },
   {

@@ -153,6 +153,14 @@ export interface Ingestion {
   funnel: { listed: number; fetched: number; passed_filter: number; accepted: number; non_ticket: number; fetch_failed: number }
   enrichPending: number
   enrichFailed: number
+  /** Failed jobs that still have retries left — the ones a retry can actually help. */
+  enrichRetryable: number
+  /**
+   * Failed jobs past `max_attempts`. These are dead-lettered: the input itself is bad
+   * (an unresolvable venue string, a URL where a venue name should be), so retrying
+   * produces the identical failure forever. They need a data fix, not a retry.
+   */
+  enrichExhausted: number
 }
 
 async function loadIngestion(db: Db): Promise<Ingestion> {
@@ -160,8 +168,13 @@ async function loadIngestion(db: Db): Promise<Ingestion> {
   const [runsRes, pendingRes, failedRes] = await Promise.all([
     db.from('scan_runs').select('outcome, listed, fetched, passed_filter, accepted, non_ticket, fetch_failed').gte('started_at', since7d).limit(5000),
     db.from('enrichment_jobs').select('ticket_id', { count: 'exact', head: true }).eq('status', 'pending'),
-    db.from('enrichment_jobs').select('ticket_id', { count: 'exact', head: true }).eq('status', 'failed'),
+    // Rows rather than a head count: the retryable/exhausted split below is what decides
+    // whether this is an incident or a standing data-quality backlog.
+    db.from('enrichment_jobs').select('attempts, max_attempts', { count: 'exact' }).eq('status', 'failed').limit(1000),
   ])
+  const failedRows = (failedRes.data ?? []) as { attempts: number | null; max_attempts: number | null }[]
+  const enrichRetryable = failedRows.filter((r) => (r.attempts ?? 0) < (r.max_attempts ?? 0)).length
+  const enrichExhausted = failedRows.length - enrichRetryable
   const rows = (runsRes.data ?? []) as { outcome: string | null; listed: number | null; fetched: number | null; passed_filter: number | null; accepted: number | null; non_ticket: number | null; fetch_failed: number | null }[]
   const outcomes = new Map<string, number>()
   const funnel = { listed: 0, fetched: 0, passed_filter: 0, accepted: 0, non_ticket: 0, fetch_failed: 0 }
@@ -180,6 +193,8 @@ async function loadIngestion(db: Db): Promise<Ingestion> {
     funnel,
     enrichPending: pendingRes.count ?? 0,
     enrichFailed: failedRes.count ?? 0,
+    enrichRetryable,
+    enrichExhausted,
   }
 }
 
@@ -193,12 +208,19 @@ function pipelineCheck(snap: Snapshot): Check {
   return { name: 'Import pipeline', status: 'ok', detail }
 }
 
-// The enrichment worker's failed-job backlog. Unlike the checks above this is a *data*
-// problem rather than a reachability one, which is exactly the kind with a runbook
-// (retry the jobs) — see lib/remediation.ts.
+// The enrichment worker's failed-job backlog.
+//
+// Only RETRYABLE failures drive the alert. Jobs past max_attempts are dead-lettered — their
+// input is bad, so they fail identically forever, and counting them would keep the incident
+// permanently open and re-fire it after every retry. They're reported in the detail line so
+// they stay visible as a data-quality backlog without pretending to be an outage.
 function enrichmentCheck(ing: Ingestion): Check {
-  const detail = `${ing.enrichPending.toLocaleString()} pending · ${ing.enrichFailed.toLocaleString()} failed`
-  if (ing.enrichFailed >= 25) return { name: 'Enrichment backlog', status: 'warn', detail }
+  const parts = [`${ing.enrichPending.toLocaleString()} pending`]
+  if (ing.enrichRetryable) parts.push(`${ing.enrichRetryable.toLocaleString()} failed (retryable)`)
+  if (ing.enrichExhausted) parts.push(`${ing.enrichExhausted.toLocaleString()} dead-lettered — needs a data fix, not a retry`)
+  if (!ing.enrichRetryable && !ing.enrichExhausted) parts.push('0 failed')
+  const detail = parts.join(' · ')
+  if (ing.enrichRetryable >= 25) return { name: 'Enrichment backlog', status: 'warn', detail }
   return { name: 'Enrichment backlog', status: 'ok', detail }
 }
 
