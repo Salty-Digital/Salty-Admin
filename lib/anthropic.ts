@@ -1,4 +1,5 @@
 import { TICKET_CATEGORIES, CATEGORY_LABELS } from './categories'
+import { recordLlmCall, tokensFromAnthropicUsage } from './llm/log'
 
 // Salty's edge functions call Anthropic over raw fetch with a forced tool call (see
 // enrich-cast); the admin app has no SDK installed, so we mirror that proven pattern —
@@ -142,6 +143,7 @@ export async function aiEventLookup(
   }
   if (!input.title?.trim() && !image) return { ok: false, error: 'A title or ticket image is required to search.' }
 
+  const t0 = Date.now()
   try {
     // Attach the physical-ticket scan when we have one so the model transcribes the real
     // ticket instead of recalling the event from the title alone.
@@ -168,9 +170,18 @@ export async function aiEventLookup(
     })
     if (!res.ok) {
       const body = await res.text().catch(() => '')
-      return { ok: false, error: `AI lookup failed (${res.status}). ${body.slice(0, 300)}` }
+      const error = `AI lookup failed (${res.status}). ${body.slice(0, 300)}`
+      await recordLlmCall({ operation: 'manual-edit.event-lookup', model: MODEL, latencyMs: Date.now() - t0, ok: false, error })
+      return { ok: false, error }
     }
-    const json = (await res.json()) as { content?: { type: string; input?: Record<string, unknown> }[] }
+    const json = (await res.json()) as { content?: { type: string; input?: Record<string, unknown> }[]; usage?: unknown }
+    // Ledger entry — this is what makes AI spend attributable to a feature on /llm-costs.
+    await recordLlmCall({
+      operation: 'manual-edit.event-lookup',
+      model: MODEL,
+      tokens: tokensFromAnthropicUsage(json.usage),
+      latencyMs: Date.now() - t0,
+    })
     const input_ = json.content?.find((b) => b.type === 'tool_use')?.input
     if (!input_) return { ok: false, error: 'The model returned no result. Try again.' }
 
@@ -223,7 +234,9 @@ export async function aiEventLookup(
       },
     }
   } catch (e) {
-    return { ok: false, error: (e as Error).message }
+    const error = (e as Error).message
+    await recordLlmCall({ operation: 'manual-edit.event-lookup', model: MODEL, latencyMs: Date.now() - t0, ok: false, error: error.slice(0, 300) })
+    return { ok: false, error }
   }
 }
 
@@ -277,6 +290,7 @@ export async function verifyTicketCategory(
   if (!key) return { ok: false, error: 'ANTHROPIC_API_KEY is not set in the admin environment.' }
   if (!input.title?.trim()) return { ok: false, error: 'A title is required to check the category.' }
 
+  const t0 = Date.now()
   try {
     const res = await fetch(ANTHROPIC_URL, {
       method: 'POST',
@@ -291,15 +305,25 @@ export async function verifyTicketCategory(
     })
     if (!res.ok) {
       const body = await res.text().catch(() => '')
-      return { ok: false, error: `AI category check failed (${res.status}). ${body.slice(0, 200)}` }
+      const error = `AI category check failed (${res.status}). ${body.slice(0, 200)}`
+      await recordLlmCall({ operation: 'data-quality.category-check', model: MODEL, latencyMs: Date.now() - t0, ok: false, error })
+      return { ok: false, error }
     }
-    const json = (await res.json()) as { content?: { type: string; input?: Record<string, unknown> }[] }
+    const json = (await res.json()) as { content?: { type: string; input?: Record<string, unknown> }[]; usage?: unknown }
+    await recordLlmCall({
+      operation: 'data-quality.category-check',
+      model: MODEL,
+      tokens: tokensFromAnthropicUsage(json.usage),
+      latencyMs: Date.now() - t0,
+    })
     const out = json.content?.find((b) => b.type === 'tool_use')?.input as Partial<CategoryAssessment> | undefined
     if (!out) return { ok: false, error: 'The model returned no result. Try again.' }
     const category = String(out.category ?? '').trim()
     if (!(TICKET_CATEGORIES as readonly string[]).includes(category)) return { ok: false, error: 'The model returned an unknown category.' }
     return { ok: true, data: { category, confident: !!out.confident, reason: String(out.reason ?? '').trim() } }
   } catch (e) {
-    return { ok: false, error: (e as Error).message }
+    const error = (e as Error).message
+    await recordLlmCall({ operation: 'data-quality.category-check', model: MODEL, latencyMs: Date.now() - t0, ok: false, error: error.slice(0, 300) })
+    return { ok: false, error }
   }
 }

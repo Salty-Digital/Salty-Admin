@@ -36,12 +36,14 @@ export async function proxy(request: NextRequest) {
   //  - /unsubscribe/[id]     — HMAC-signed human unsubscribe confirmation page
   //  - /api/unsubscribe      — the RFC 8058 one-click POST Gmail/Yahoo send (HMAC-signed)
   //  - /api/webhooks/*       — Resend webhooks, verified by their Svix signature
+  //  - /api/cron/*           — scheduled jobs, authenticated by the CRON_SECRET bearer
   const isPublicPath =
     pathname === '/login' ||
     pathname.startsWith('/accept-invite') ||
     pathname.startsWith('/unsubscribe') ||
     pathname.startsWith('/api/unsubscribe') ||
-    pathname.startsWith('/api/webhooks')
+    pathname.startsWith('/api/webhooks') ||
+    pathname.startsWith('/api/cron')
 
   if (!user && !isPublicPath) {
     const url = request.nextUrl.clone()

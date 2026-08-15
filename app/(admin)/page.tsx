@@ -4,6 +4,7 @@ import { createServiceClient } from '@/lib/supabase/server'
 import { TicketActivityChart } from '@/components/charts/ticket-activity-chart'
 import { CategoryDonutChart } from '@/components/charts/category-donut-chart'
 import { CATEGORY_EMOJI } from '@/lib/categories'
+import { countPendingImportUsers } from '@/lib/pending-imports'
 import { ClickableRow } from '@/components/ui/clickable-row'
 import {
   Users, Ticket, MailOpen, Import, Wifi,
@@ -42,6 +43,7 @@ async function getDashboardData() {
     { count: gmailCount },
     { count: imapCount },
     { count: pendingCount },
+    pendingUserCount,
     { count: bannedCount },
     activeTodayCount,
     { data: recentTickets },
@@ -57,6 +59,7 @@ async function getDashboardData() {
     db.from('gmail_connections').select('*', { count: 'exact', head: true }),
     db.from('imap_connections').select('*', { count: 'exact', head: true }),
     db.from('pending_imports').select('*', { count: 'exact', head: true }).eq('status', 'pending'),
+    countPendingImportUsers(db),
     db.from('users').select('*', { count: 'exact', head: true }).not('banned_until', 'is', null).gt('banned_until', nowIso),
     getActiveTodayCount(db),
     db.from('tickets').select('source, imported_at').gte('imported_at', cutoff),
@@ -152,6 +155,7 @@ async function getDashboardData() {
     ticketCount: ticketCount ?? 0,
     emailConnectedCount,
     pendingCount: pendingCount ?? 0,
+    pendingUserCount,
     bannedCount: bannedCount ?? 0,
     bannedPct,
     activeTodayCount,
@@ -170,13 +174,15 @@ async function getDashboardData() {
 // ─── Sub-components ────────────────────────────────────────────────────────────
 
 function StatCard({
-  label, value, icon: Icon, accent, trend,
+  label, value, icon: Icon, accent, trend, sub,
 }: {
   label: string
   value: number
   icon: React.ElementType
   accent: string
   trend?: { value: string; up: boolean }
+  /** Clarifying line under the number — used where the unit isn't obvious from the label. */
+  sub?: string
 }) {
   return (
     <div className="relative overflow-hidden rounded-[14px] border border-salty-border bg-warm-white p-5">
@@ -191,6 +197,7 @@ function StatCard({
       <p className="font-sora text-[28px] font-bold leading-none tracking-tight text-salty-text">
         {value.toLocaleString()}
       </p>
+      {sub && <p className="mt-1.5 text-[11.5px] text-salty-muted">{sub}</p>}
       {trend && (
         <p className={`mt-1.5 flex items-center gap-1 text-[12px] ${trend.up ? 'text-[#3E8A5A]' : 'text-[#BF4A3A]'}`}>
           {trend.up ? <TrendingUp className="h-3 w-3" /> : <TrendingDown className="h-3 w-3" />}
@@ -272,7 +279,9 @@ export default async function DashboardPage() {
     alerts.push(`Import reject rate is ${d.rejectRate24}% over the last 24h — the importer or classifier may be regressing.`)
   }
   if (d.pendingCount > 1000) {
-    alerts.push(`${d.pendingCount.toLocaleString()} imports are pending review — the queue is backing up.`)
+    alerts.push(
+      `${d.pendingCount.toLocaleString()} imported events are still unreviewed, across ${d.pendingUserCount.toLocaleString()} user${d.pendingUserCount === 1 ? '' : 's'} — the approval queue is backing up.`,
+    )
   }
 
   const kpis = [
@@ -280,7 +289,15 @@ export default async function DashboardPage() {
     { label: 'Tickets Stored',   value: d.ticketCount,         icon: Ticket,      accent: '#C8A96E' },
     { label: 'Email Connected',  value: d.emailConnectedCount, icon: MailOpen,    accent: '#5A9E6F' },
     { label: 'Active Today',     value: d.activeTodayCount,    icon: Wifi,        accent: '#5A8FBF' },
-    { label: 'Pending Review',   value: d.pendingCount,        icon: Import,      accent: '#7B44A8' },
+    // Counts EVENTS awaiting a user's approval, not users — the sub-line says so, because
+    // the bare number reads as a user count and isn't one.
+    {
+      label: 'Unreviewed Events',
+      value: d.pendingCount,
+      icon: Import,
+      accent: '#7B44A8',
+      sub: `across ${d.pendingUserCount.toLocaleString()} user${d.pendingUserCount === 1 ? '' : 's'}`,
+    },
   ]
 
   return (

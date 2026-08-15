@@ -2,6 +2,7 @@ import Link from 'next/link'
 import { requireAdmin } from '@/lib/auth'
 import { createServiceClient } from '@/lib/supabase/server'
 import { Card, CardContent } from '@/components/ui/card'
+import { countPendingImportUsers } from '@/lib/pending-imports'
 import { ImportsTable } from './imports-table'
 
 const PAGE_SIZE = 50
@@ -36,15 +37,21 @@ export default async function PendingImportsPage({ searchParams }: PageProps) {
   const ascending = PENDING_SORT_COLS[sort] ? dir === 'asc' : false
 
   // Accurate per-status totals (for the tab badges) — counted directly, not from a sample.
-  const [pendingCount, approvedCount, acceptedCount, rejectedCount] = await Promise.all(
-    STATUSES.map((s) =>
-      db
-        .from('pending_imports')
-        .select('*', { count: 'exact', head: true })
-        .eq('status', s)
-        .then((r) => r.count ?? 0),
+  const [[pendingCount, approvedCount, acceptedCount, rejectedCount], pendingUserCount] = await Promise.all([
+    Promise.all(
+      STATUSES.map((s) =>
+        db
+          .from('pending_imports')
+          .select('*', { count: 'exact', head: true })
+          .eq('status', s)
+          .then((r) => r.count ?? 0),
+      ),
     ),
-  )
+    // Each row here is one EVENT awaiting its owner's approval, and a single user with a
+    // linked inbox can account for dozens — so the total on its own reads as a user count
+    // and badly overstates reach.
+    countPendingImportUsers(db),
+  ])
   const counts: Record<ImportStatus, number> = {
     pending: pendingCount,
     approved: approvedCount,
@@ -65,10 +72,20 @@ export default async function PendingImportsPage({ searchParams }: PageProps) {
 
   return (
     <div className="p-6 space-y-4">
-      <div className="flex items-center justify-between">
-        <h1 className="text-2xl font-semibold tracking-tight">Pending Imports</h1>
-        <span className="text-sm text-muted-foreground">
-          {counts.pending.toLocaleString()} pending review
+      <div className="flex flex-wrap items-baseline justify-between gap-2">
+        <div>
+          <h1 className="text-2xl font-semibold tracking-tight">Pending Imports</h1>
+          <p className="text-[13px] text-salty-muted">
+            Events found in users’ inboxes, calendars and photos that the user hasn’t approved
+            or rejected yet.
+          </p>
+        </div>
+        <span className="text-right text-sm text-muted-foreground">
+          {counts.pending.toLocaleString()} unreviewed event{counts.pending === 1 ? '' : 's'}
+          <br />
+          <span className="text-[12px]">
+            across {pendingUserCount.toLocaleString()} user{pendingUserCount === 1 ? '' : 's'}
+          </span>
         </span>
       </div>
 
