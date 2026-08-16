@@ -96,6 +96,11 @@ const NAV_SECTIONS: NavSection[] = [
       { href: '/release-gate',          label: 'Release Gate', icon: Smartphone, maxLevel: 1 },
       { href: '/settings/config',       label: 'Config Status', icon: KeyRound, maxLevel: 1 },
       { href: '/settings/feature-flags', label: 'Feature Flags', icon: ToggleLeft, maxLevel: 1 },
+    ],
+  },
+  {
+    label: 'Admin',
+    items: [
       { href: '/settings/admin-users',  label: 'Admin Users', icon: Settings, maxLevel: 1 },
       { href: '/settings/audit-log',    label: 'Audit Log',   icon: Database, maxLevel: 1 },
     ],

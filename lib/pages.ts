@@ -56,8 +56,11 @@ export const ADMIN_PAGES: AdminPage[] = [
   { href: '/release-gate',            label: 'Release Gate',   section: 'System', maxLevel: 1 },
   { href: '/settings/config',         label: 'Config Status',  section: 'System', maxLevel: 1 },
   { href: '/settings/feature-flags',  label: 'Feature Flags',  section: 'System', maxLevel: 1 },
-  { href: '/settings/admin-users',    label: 'Admin Users',    section: 'System', maxLevel: 1 },
-  { href: '/settings/audit-log',      label: 'Audit Log',      section: 'System', maxLevel: 1 },
+
+  // Admin: who can use this panel, and what they did with it. Split out of System because these
+  // two govern the panel's own access rather than the product's health.
+  { href: '/settings/admin-users',    label: 'Admin Users',    section: 'Admin', maxLevel: 1 },
+  { href: '/settings/audit-log',      label: 'Audit Log',      section: 'Admin', maxLevel: 1 },
 ]
 
 export const PAGE_SECTIONS = [...new Set(ADMIN_PAGES.map((p) => p.section))]
@@ -84,25 +87,36 @@ export function pageForPath(pathname: string): AdminPage | null {
 /**
  * Can this admin reach this page?
  *
- * Two gates, both must pass:
- *   1. LEVEL  — the existing capability bar. Unchanged, and the allowlist cannot override it.
- *   2. ALLOWLIST — an optional per-admin narrowing.
+ * The model is "level is the DEFAULT, an explicit allowlist is the OVERRIDE":
  *
- * Level 1 (Super Admin) always bypasses the allowlist: someone has to be able to fix a
- * mis-configured allowlist, and locking the owner out of /settings/admin-users would be
- * unrecoverable through the UI.
+ *   allowed_pages == null   -> level rules apply (access_level <= page.maxLevel).
+ *   allowed_pages set       -> exactly those pages, whatever the level says.
+ *   access_level <= 1       -> everything, always.
  *
- * `allowedPages == null` means "not configured" and imposes NO restriction — so existing admins
- * keep exactly the access they had until someone deliberately narrows them. An EMPTY array is a
- * real, deliberate "no pages".
+ * NOTE — this is a deliberate change from the original design, where the allowlist could only ever
+ * NARROW. It could not grant a level-2 admin a level-1 page like /settings/config, which made the
+ * feature useless for its actual purpose: handing a specific System page to a specific person
+ * without promoting them to Super Admin.
+ *
+ * The safety property that makes widening acceptable is that PAGE access is not CAPABILITY. Every
+ * mutating server action independently calls requireAdmin(n), so granting someone /settings/config
+ * lets them SEE it while its level-1 actions still refuse them. The picker warns when a granted
+ * page sits above the admin's level for exactly that reason.
+ *
+ * Level 1 still bypasses everything: someone must always be able to repair a bad allowlist, and
+ * locking the owner out of /settings/admin-users would be unrecoverable through the UI.
  */
 export function canAccessPage(
   admin: { access_level: number; allowed_pages: string[] | null },
   page: AdminPage | null,
 ): boolean {
-  if (!page) return true                       // unregistered path — level checks still apply
-  if (admin.access_level > page.maxLevel) return false
-  if (admin.access_level <= 1) return true
-  if (admin.allowed_pages == null) return true
+  if (!page) return true                        // unregistered path — page gates don't apply
+  if (admin.access_level <= 1) return true      // Super Admin: everything, always
+  if (admin.allowed_pages == null) return admin.access_level <= page.maxLevel
   return admin.allowed_pages.includes(page.href)
+}
+
+/** True when this page sits above the admin's level, so its actions may still refuse them. */
+export function isAboveLevel(accessLevel: number, page: AdminPage): boolean {
+  return accessLevel > page.maxLevel
 }

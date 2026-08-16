@@ -161,12 +161,13 @@ export async function setAllowedPagesAction(targetAdminId: string, pages: string
     throw new Error('Super Admins always have access to every page — restrict their level instead.')
   }
 
-  // Drop anything not in the registry, and anything their level could not reach anyway.
+  // Drop anything not in the registry, so a typo or a removed page can't linger as a permission.
+  // Pages ABOVE the target's level are kept: an explicit allowlist overrides the level, which is
+  // how a single System page gets granted without promoting someone to Super Admin. Capability is
+  // still bounded — each page's own actions call requireAdmin(n) independently.
   const clean = pages === null
     ? null
-    : [...new Set(pages)].filter((href) =>
-        ADMIN_PAGES.some((p) => p.href === href && target.access_level <= p.maxLevel),
-      )
+    : [...new Set(pages)].filter((href) => ADMIN_PAGES.some((p) => p.href === href))
 
   await db.from('admin_users').update({ allowed_pages: clean }).eq('id', tid)
   await logAudit(admin.id, 'set_admin_page_access', 'admin_user', tid, {

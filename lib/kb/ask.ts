@@ -108,8 +108,10 @@ KNOWN TRAPS (each caused a real bug)
 ADMIN ACCESS MODEL
 - Four levels, 1 = Super Admin (highest) .. 4 = Support. Page-level requireAdmin(n) redirects;
   every server action re-checks independently — the action is the real boundary.
-- Per-admin page allowlists (admin_users.allowed_pages) narrow access further; they can never widen
-  it past the level, and level 1 bypasses them.
+- Per-admin page allowlists (admin_users.allowed_pages): null = level rules apply; set = that list
+  is authoritative and OVERRIDES the level, so a level-1 page can be granted to a level-2 admin.
+  Safe because page access is not capability — each page's actions still call requireAdmin(n), so a
+  granted page is viewable but its actions refuse. Level 1 bypasses the allowlist entirely.
 `.trim()
 
 function buildSystemPrompt(): string {

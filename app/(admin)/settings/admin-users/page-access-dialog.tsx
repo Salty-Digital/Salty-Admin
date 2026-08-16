@@ -7,7 +7,7 @@ import {
   Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, DialogTrigger,
 } from '@/components/ui/dialog'
 import { Button } from '@/components/ui/button'
-import { ADMIN_PAGES, PAGE_SECTIONS } from '@/lib/pages'
+import { ADMIN_PAGES, PAGE_SECTIONS, isAboveLevel } from '@/lib/pages'
 import { setAllowedPagesAction } from './actions'
 
 /**
@@ -15,10 +15,12 @@ import { setAllowedPagesAction } from './actions'
  *
  * Two distinct states, and the difference matters:
  *   Unrestricted  allowed_pages IS NULL — this admin sees everything their LEVEL permits.
- *   Restricted    an explicit list, which can be empty.
+ *   Restricted    an explicit list, which becomes authoritative regardless of level.
  *
- * Only pages the target's level can already reach are offered. The allowlist narrows; it never
- * widens, so showing a level-2 admin a level-1 page would imply a grant that cannot happen.
+ * EVERY page is offered, including ones above the target's access level, because granting a
+ * specific System page to a specific person without promoting them to Super Admin is the whole
+ * point of the feature. Those are marked, because page access is not capability: the page's own
+ * server actions still call requireAdmin(n) and will refuse them.
  */
 export function PageAccessDialog({
   adminId, email, accessLevel, allowedPages,
@@ -33,7 +35,8 @@ export function PageAccessDialog({
   const [pending, start] = useTransition()
   const [error, setError] = useState<string | null>(null)
 
-  const eligible = useMemo(() => ADMIN_PAGES.filter((p) => accessLevel <= p.maxLevel), [accessLevel])
+  // Every page, not just the level-eligible ones — an explicit allowlist overrides the level.
+  const eligible = useMemo(() => ADMIN_PAGES, [])
   const [restricted, setRestricted] = useState(allowedPages !== null)
   const [selected, setSelected] = useState<Set<string>>(
     () => new Set(allowedPages ?? eligible.map((p) => p.href)),
@@ -128,25 +131,39 @@ export function PageAccessDialog({
                       </button>
                     </div>
                     <div className="grid gap-x-4 gap-y-1 p-3 sm:grid-cols-2">
-                      {pages.map((p) => (
-                        <label key={p.href} className="flex cursor-pointer items-center gap-2 text-[12.5px] text-salty-text">
-                          <input
-                            type="checkbox"
-                            checked={selected.has(p.href)}
-                            onChange={() => toggle(p.href)}
-                            className="h-3.5 w-3.5 accent-[#E8581A]"
-                          />
-                          <span>{p.label}</span>
-                          <span className="ml-auto font-mono text-[10.5px] text-salty-muted">{p.href}</span>
-                        </label>
-                      ))}
+                      {pages.map((p) => {
+                        const above = isAboveLevel(accessLevel, p)
+                        return (
+                          <label key={p.href} className="flex cursor-pointer items-center gap-2 text-[12.5px] text-salty-text">
+                            <input
+                              type="checkbox"
+                              checked={selected.has(p.href)}
+                              onChange={() => toggle(p.href)}
+                              className="h-3.5 w-3.5 accent-[#E8581A]"
+                            />
+                            <span>{p.label}</span>
+                            {above && (
+                              <span
+                                title={`This page normally needs level ${p.maxLevel}. They can open it, but its actions still require level ${p.maxLevel} and will refuse them.`}
+                                className="rounded-full bg-[#FBF1DE] px-1.5 py-0.5 text-[9.5px] font-semibold text-[#8A6830]"
+                              >
+                                L{p.maxLevel}
+                              </span>
+                            )}
+                            <span className="ml-auto font-mono text-[10.5px] text-salty-muted">{p.href}</span>
+                          </label>
+                        )
+                      })}
                     </div>
                   </div>
                 )
               })}
               <p className="text-[11.5px] text-salty-muted">
-                {selected.size} of {eligible.length} selected. Only pages their level (
-                {accessLevel}) can already reach are listed.
+                {selected.size} of {eligible.length} selected. An explicit list overrides their
+                access level, so pages above level {accessLevel} can be granted — those are marked{' '}
+                <span className="rounded-full bg-[#FBF1DE] px-1.5 py-0.5 text-[9.5px] font-semibold text-[#8A6830]">L1</span>{' '}
+                and stay viewable-but-not-actionable, because each page&apos;s own actions still
+                enforce the level.
               </p>
             </div>
           )}

@@ -527,6 +527,14 @@ function AdminView() {
           <Code>maskEmail()</Code> for everyone else. It is applied per page, so a new page inherits
           nothing.
         </Rule>
+        <Rule title="Page allowlists override the level — capability does not">
+          <Code>admin_users.allowed_pages</Code> null means &quot;level rules apply&quot;. Set, it
+          becomes authoritative: the admin reaches exactly those pages, including ones above their
+          level. That is how a single System page is granted without promoting anyone to Super
+          Admin. It is safe only because page access is not capability — each page&apos;s server
+          actions still call <Code>requireAdmin(n)</Code>, so a granted level-1 page is viewable but
+          its actions refuse. Level 1 bypasses the allowlist so a bad config is always repairable.
+        </Rule>
       </Section>
 
       <Section id="services" title="Applications & services" icon={Plug} sub="What the admin itself connects to.">
