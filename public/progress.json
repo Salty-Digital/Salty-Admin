@@ -1,0 +1,44 @@
+{
+  "generated": "2026-08-16",
+  "repo": "salty-mobile",
+  "summary": "Two enrichment pipelines repaired: venue geocoding and sports game resolution. Both were failing silently on dirty search keys rather than on provider outages.",
+  "workstreams": [
+    {
+      "id": "geocode",
+      "title": "Venue geocoding",
+      "status": "shipped",
+      "metric": { "label": "tickets with map coordinates", "before": 0, "after": 19, "of": 29 },
+      "detail": "28 tickets (not 20 as first reported) were dead-lettered with 'no related result'. Root cause was not the provider: Nominatim has no API key and returned HTTP 200 every time. It returns an empty result when a venue NAME is mashed with a STREET ADDRESS in one query, and the fallback query ladder only ran when the address sat on its own newline — so 26 of 28 venues issued a single unanswerable query.",
+      "outcome": "19 resolved, 3 correctly classified not-geocodable (a URL, a bare country, a private residence), 7 honest misses. No wrong pins."
+    },
+    {
+      "id": "sports",
+      "title": "Sports game resolution",
+      "status": "shipped",
+      "metric": { "label": "sports tickets with a resolved game", "before": 55, "after": 70, "of": 93 },
+      "detail": "Tickets naming one team ('NY Rangers', 'Shenkman Mets Game') never resolved an opponent. parseSingleTeam never returns null, so noisy titles were sent to the API verbatim and matched nothing. Cleaning the key then exposed a second failure: ambiguous nicknames resolved to the wrong team entirely (Mets -> Puerto Rico, Giants -> Australia).",
+      "outcome": "Venue now disambiguates the team, a geography guard rejects impossible matches, and a venue->home-team index resolves tickets whose titles name no usable team. 11 wrong rows found and removed."
+    }
+  ],
+  "quality": {
+    "tests": 2364,
+    "testsAdded": 147,
+    "falsePositivesRemoved": 11,
+    "foreignLeaguesOnUsVenues": 0
+  },
+  "shipped": [
+    "Query ladder now segments on commas and dashes, not just newlines",
+    "Locality is never dropped from a query when the venue supplies one",
+    "Typo-tolerant fallback provider for misspelled venues (Wriggly Field -> Wrigley Field)",
+    "URLs, bare countries and private residences no longer enter the geocode queue",
+    "Team abbreviations expanded (NYR, D-backs) for both search and verification",
+    "Year-less dates placed via weekday inference (Sun, Jul 26 -> 2015-07-26)",
+    "Geography guard: a result must be plausible for the ticket's coordinates",
+    "Venue -> home team index learned from already-resolved tickets"
+  ],
+  "knownGaps": [
+    "eventsday.php returns no venue field, so the venue-anchored path resolves through home team only",
+    "A right-country but wrong-venue game can still slip through on the team-anchored path",
+    "Tickets with venue 'TBD' cannot use any venue-based signal"
+  ]
+}
