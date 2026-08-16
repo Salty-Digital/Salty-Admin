@@ -8,17 +8,18 @@ _Last updated: 2026-08-16_
 
 ## Summary
 
-Two enrichment pipelines were repaired. Both were failing silently — and in both cases the
-cause was a **dirty search key**, not a provider outage. That distinction mattered: the
-obvious fixes (check the API key, retry the failures) would have found nothing.
+Three pieces of work: two enrichment pipelines repaired, and the Supabase migration history
+rebaselined. All three were failing for the same underlying reason — **a dirty or diverged
+key, not a provider outage** — which is why retrying had never helped.
 
 | Workstream | Before | After | Of |
 |---|---|---|---|
 | Tickets with map coordinates | 0 | **19** | 29 |
 | Sports tickets with a resolved game | 55 | **70** | 93 |
+| Matching versions, repo ↔ prod ledger | 28 of 218 | **1** | 1 |
 
-Test suite: **2364 passing** (147 added). Wrong rows found and removed: **11**.
-Foreign leagues sitting on US-venue tickets: **0**.
+Tests: **2364 passing** (147 added). Wrong rows found and removed: **11**.
+Foreign leagues on US-venue tickets: **0**. Prod schema changes: **0**.
 
 ---
 
@@ -26,15 +27,12 @@ Foreign leagues sitting on US-venue tickets: **0**.
 
 28 tickets — not the 20 first reported — sat permanently failed with `no related result`.
 
-The instinct was to blame the geocoder. That was wrong on every count: the provider is
-Nominatim, which **has no API key**, and it returned **HTTP 200 on every request**. No auth
-failure, no quota exhaustion.
-
-The real cause: Nominatim returns an empty result when a venue *name* is mashed together with
-a *street address* in one query. A fallback ladder existed to split them — but only fired when
-the address sat on its own newline. Comma-separated `Name, street, city, ST` — by far the most
-common shape — produced exactly one candidate: the one form guaranteed to return nothing.
-**26 of 28 venues issued a single unanswerable query.**
+The provider was never at fault. It's Nominatim, which **has no API key**, and it returned
+**HTTP 200 on every request**. The real cause: it returns an empty result when a venue *name*
+is mashed together with a *street address* in one query. A fallback ladder existed to split
+them, but only fired when the address sat on its own newline — so comma-separated
+`Name, street, city, ST`, by far the most common shape, produced exactly one candidate: the
+one form guaranteed to return nothing. **26 of 28 venues issued a single unanswerable query.**
 
 **Result:** 19 resolved, 3 correctly marked not-geocodable (a URL, a bare country, a private
 residence), 7 honest misses, no wrong pins.
@@ -43,21 +41,34 @@ residence), 7 honest misses, no wrong pins.
 
 ## Sports game resolution
 
-Tickets naming a single team (`NY Rangers`, `Shenkman Mets Game`) never resolved an opponent.
-`parseSingleTeam` never returns null — it passed noisy titles to the API verbatim, which
-matched nothing, so the lookup died before reaching any fixture.
+Tickets naming a single team never resolved an opponent: `parseSingleTeam` never returns
+null, so noisy titles went to the API verbatim and matched nothing.
 
-Cleaning the key exposed a worse problem: ambiguous nicknames resolved to the **wrong team**.
+Cleaning the key exposed a worse problem — ambiguous nicknames resolved to the **wrong team**.
 Live, `Mets` returned a Puerto Rican basketball club and `Giants` an Australian netball team.
+An earlier revision wrote **11 confidently wrong rows** before a geography guard caught them;
+all were removed and each is now covered by a regression test.
 
-The fix uses the ticket's venue to disambiguate the team, then a geography guard to reject
-results that cannot be where the ticket was. An earlier revision of this work wrote **11
-confidently wrong rows** — a Vermont college hockey ticket resolving to English football, a
-Madison Square Garden ticket to a Scottish match. All were caught and removed; regression
-tests now cover each one.
+**Result:** 70 of 93 resolved, zero geographically impossible matches.
 
-**Result:** 70 of 93 resolved, every remaining wrong row removed, zero geographically
-impossible matches.
+---
+
+## Supabase migration history
+
+The repo and prod's applied ledger had drifted to **125 files vs 218 rows, only 28 versions
+in common**. `supabase db push` was unusable, so every migration went in by a route that
+stamps its own version — widening the gap daily.
+
+Verified before acting, which changed the plan: replaying the old repo produced **60 tables
+against prod's 68**. It was a strict subset, missing eight admin/ops tables. Repairing the
+ledger to match it would have made every future branch and reset **silently miss them** —
+converting a visible drift into an invisible one.
+
+So the baseline was dumped **from prod**, 192 files archived, and the ledger repaired to a
+single row.
+
+**Result:** `db push` reports "Remote database is up to date" again. Prod schema untouched;
+the previous 218-row ledger is backed up.
 
 ---
 
@@ -70,41 +81,42 @@ impossible matches.
 - Team abbreviations expanded (`NYR`, `D-backs`) for both search and verification
 - Year-less dates placed by weekday inference (`Sun, Jul 26` → 2015-07-26)
 - Geography guard — a result must be plausible for the ticket's coordinates
-- Venue → home team index, learned from already-resolved tickets rather than hard-coded
+- Venue → home team index, learned from resolved tickets rather than hard-coded
+- Migration baseline rebuilt from prod; `db push` restored
 
 ---
 
 ## Pending
 
-From **Linear (team Salty)**, the source of truth. Highest-signal items first.
+From **Linear (team Salty)**, the source of truth.
 
 | Issue | Priority | Status | Item |
 |---|---|---|---|
-| SAL2-19 | High | Todo | Renew GitHub token — **expired 2026-08-06**, now overdue |
-| SAL2-455 | High | In Progress | Reconcile Supabase migration history (repo 90 vs prod ledger 169) — breaks branching and CI previews |
+| SAL2-458 | High | Backlog | **Connect the Supabase GitHub integration** — preview branches replay zero migrations without it |
+| SAL2-455 | High | In Progress | Migration history reconciled; branching still broken, blocked on SAL2-458 |
+| SAL2-19 | High | Todo | Renew GitHub token — **expired 2026-08-06**, overdue |
 | SAL2-434 | High | Backlog | Rotate `SALTY_CRM_WEBHOOK_SECRET` — exposed in plaintext in a transcript |
 | SAL2-363 | High | Backlog | Rotate `SUPABASE_SERVICE_ROLE_KEY` and Apple dev/dist certs |
 | SAL2-345 | High | Backlog | Audit every secret in Doppler `salty-v2/prd` against dev |
+| SAL2-445 | Medium | Blocked | Automated load testing — needs a working branch/staging target |
 | SAL2-417 | High | Backlog | Restore Kanban view, description preview and min-score slider on `/pipeline` |
-| SAL2-372 | High | Backlog | Revise beta feedback survey (timing + functional/design/content categories) |
+| SAL2-372 | High | Backlog | Revise beta feedback survey |
 | SAL2-446 | — | Backlog | Check `salty-admin` for the same login bug as `salty-crm` |
-| SAL2-454 | Medium | In Progress | Benchmark fast-rising consumer apps' onboarding and photo-discovery flows |
 | SAL2-366 | Medium | Backlog | Manual ticket-add cannot create past events, future only |
-| SAL2-352 | Medium | Backlog | Close PostHog event-tracking gaps (sign_in/sign_up, funnel completion) |
-| SAL2-425 | Low | Backlog | Fix `meet_watcher` false positive: "found N files but extracted 0 items" |
-| SAL2-375 | Low | Backlog | Dedupe stale Notion Task Queue entries |
+| SAL2-352 | Medium | Backlog | Close PostHog event-tracking gaps |
 
 > **Source coverage.** Linear and Airtable were read directly. The **Notion Task Queue and raw
-> meeting transcripts could not be reached** — the Notion connector is unauthorized, and no
-> transcripts exist on disk. Transcript-derived items do flow into Linear via
-> `task_extractor`, so they are likely represented above, but completeness is unconfirmed.
-> Two open tickets (SAL2-425, SAL2-365) suggest that extraction pipeline is imperfect.
+> meeting transcripts could not be reached** — the Notion connector is unauthorized and no
+> transcripts exist on disk. Transcript items do flow into Linear via `task_extractor`, so
+> they are likely represented above, but completeness is unconfirmed.
 
 ---
 
 ## Known gaps
 
-- `eventsday.php` returns no venue field, so the venue-anchored path works through home team only
+- **Preview branches replay zero migrations** — the project has no GitHub integration connected (SAL2-458)
+- Branch status reports `MIGRATIONS_PASSED` over an empty database; **assert on table count, never status**
+- `eventsday.php` returns no venue field, so the venue-anchored sports path works through home team only
 - A right-country but wrong-venue game can still slip through on the team-anchored path
-- Tickets with venue `TBD` have no venue signal available at all
-- 23 of 93 sports tickets remain unresolved — mostly non-team events (golf, tennis, exhibitions) or titles naming no resolvable team
+- 23 of 93 sports tickets remain unresolved — mostly non-team events or titles naming no resolvable team
+- Eight admin/ops tables reach prod from outside this repo, so schema arrives from more than one source

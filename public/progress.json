@@ -1,14 +1,14 @@
 {
   "generated": "2026-08-16",
   "repo": "salty-mobile",
-  "summary": "Two enrichment pipelines repaired: venue geocoding and sports game resolution. Both were failing silently on dirty search keys rather than on provider outages.",
+  "summary": "Three pieces of work: two enrichment pipelines repaired (venue geocoding, sports game resolution) and the Supabase migration history rebaselined. All three were failing for the same underlying reason — a dirty or diverged key that made retrying useless.",
   "workstreams": [
     {
       "id": "geocode",
       "title": "Venue geocoding",
       "status": "shipped",
       "metric": { "label": "tickets with map coordinates", "before": 0, "after": 19, "of": 29 },
-      "detail": "28 tickets (not 20 as first reported) were dead-lettered with 'no related result'. Root cause was not the provider: Nominatim has no API key and returned HTTP 200 every time. It returns an empty result when a venue NAME is mashed with a STREET ADDRESS in one query, and the fallback query ladder only ran when the address sat on its own newline — so 26 of 28 venues issued a single unanswerable query.",
+      "detail": "28 tickets (not 20 as first reported) were dead-lettered with 'no related result'. The provider was never at fault: Nominatim has no API key and returned HTTP 200 every time. It returns an empty result when a venue NAME is mashed with a STREET ADDRESS in one query, and the fallback ladder only ran when the address sat on its own newline — so 26 of 28 venues issued a single unanswerable query.",
       "outcome": "19 resolved, 3 correctly classified not-geocodable (a URL, a bare country, a private residence), 7 honest misses. No wrong pins."
     },
     {
@@ -16,49 +16,60 @@
       "title": "Sports game resolution",
       "status": "shipped",
       "metric": { "label": "sports tickets with a resolved game", "before": 55, "after": 70, "of": 93 },
-      "detail": "Tickets naming one team ('NY Rangers', 'Shenkman Mets Game') never resolved an opponent. parseSingleTeam never returns null, so noisy titles were sent to the API verbatim and matched nothing. Cleaning the key then exposed a second failure: ambiguous nicknames resolved to the wrong team entirely (Mets -> Puerto Rico, Giants -> Australia).",
-      "outcome": "Venue now disambiguates the team, a geography guard rejects impossible matches, and a venue->home-team index resolves tickets whose titles name no usable team. 11 wrong rows found and removed."
+      "detail": "Tickets naming one team never resolved an opponent: parseSingleTeam never returns null, so noisy titles went to the API verbatim and matched nothing. Cleaning the key exposed a worse failure — ambiguous nicknames resolved to the wrong team entirely (Mets -> Puerto Rico, Giants -> Australia).",
+      "outcome": "Venue disambiguates the team, a geography guard rejects impossible matches, and a venue->home-team index learned from resolved tickets handles titles naming no usable team. 11 wrong rows found and removed."
+    },
+    {
+      "id": "migrations",
+      "title": "Supabase migration history",
+      "status": "shipped",
+      "metric": { "label": "matching versions between repo and prod ledger", "before": 28, "after": 1, "of": 1 },
+      "detail": "The repo and prod's applied ledger had diverged to 125 files vs 218 rows, with only 28 versions in common. `supabase db push` was unusable, so every migration went in by a route that stamps its own version — widening the gap daily. Verified before acting: replaying the old repo produced 60 tables against prod's 68, so it was a strict subset missing eight admin/ops tables. Repairing the ledger to match it would have made every future branch silently miss them.",
+      "outcome": "Baseline dumped FROM prod (68 tables), 192 files archived, ledger repaired to a single row. `db push` reports 'Remote database is up to date' again. Prod schema untouched; previous ledger backed up."
     }
   ],
   "quality": {
     "tests": 2364,
     "testsAdded": 147,
     "falsePositivesRemoved": 11,
-    "foreignLeaguesOnUsVenues": 0
+    "foreignLeaguesOnUsVenues": 0,
+    "prodSchemaChanges": 0
   },
   "shipped": [
-    "Query ladder now segments on commas and dashes, not just newlines",
+    "Query ladder segments on commas and dashes, not just newlines",
     "Locality is never dropped from a query when the venue supplies one",
-    "Typo-tolerant fallback provider for misspelled venues (Wriggly Field -> Wrigley Field)",
+    "Typo-tolerant fallback for misspelled venues (Wriggly Field -> Wrigley Field)",
     "URLs, bare countries and private residences no longer enter the geocode queue",
     "Team abbreviations expanded (NYR, D-backs) for both search and verification",
-    "Year-less dates placed via weekday inference (Sun, Jul 26 -> 2015-07-26)",
+    "Year-less dates placed by weekday inference (Sun, Jul 26 -> 2015-07-26)",
     "Geography guard: a result must be plausible for the ticket's coordinates",
-    "Venue -> home team index learned from already-resolved tickets"
+    "Venue -> home team index learned from already-resolved tickets",
+    "Migration baseline rebuilt from prod; db push restored"
   ],
   "pending": {
     "source": "Linear (team Salty) — source of truth",
-    "note": "Notion Task Queue and raw meeting transcripts were not reachable; the Notion connector is unauthorized. Transcript-derived items do reach Linear via task_extractor, so they are likely represented here, but completeness is unconfirmed.",
+    "note": "Notion Task Queue and raw meeting transcripts were not reachable; the Notion connector is unauthorized. Transcript-derived items do reach Linear via task_extractor, so they are likely represented, but completeness is unconfirmed.",
     "items": [
-      { "id": "SAL2-19",  "priority": "High", "status": "Todo",        "title": "Renew GitHub token — expired 2026-08-06, now overdue" },
-      { "id": "SAL2-455", "priority": "High", "status": "In Progress", "title": "Reconcile Supabase migration history (repo 90 vs prod ledger 169) — breaks branching and CI previews" },
-      { "id": "SAL2-434", "priority": "High", "status": "Backlog",     "title": "Rotate SALTY_CRM_WEBHOOK_SECRET — exposed in plaintext in a transcript" },
-      { "id": "SAL2-363", "priority": "High", "status": "Backlog",     "title": "Rotate SUPABASE_SERVICE_ROLE_KEY and Apple dev/dist certs" },
-      { "id": "SAL2-345", "priority": "High", "status": "Backlog",     "title": "Audit every secret in Doppler salty-v2/prd against dev" },
-      { "id": "SAL2-417", "priority": "High", "status": "Backlog",     "title": "Restore Kanban view, description preview and min-score slider on /pipeline" },
-      { "id": "SAL2-372", "priority": "High", "status": "Backlog",     "title": "Revise beta feedback survey (timing + functional/design/content categories)" },
-      { "id": "SAL2-446", "priority": "None", "status": "Backlog",     "title": "Check salty-admin for the same login bug as salty-crm" },
-      { "id": "SAL2-454", "priority": "Medium", "status": "In Progress", "title": "Benchmark fast-rising consumer apps' onboarding and photo-discovery flows" },
-      { "id": "SAL2-366", "priority": "Medium", "status": "Backlog",   "title": "Manual ticket-add cannot create past events, future only" },
-      { "id": "SAL2-352", "priority": "Medium", "status": "Backlog",   "title": "Close PostHog event-tracking gaps (sign_in/sign_up, funnel completion)" },
-      { "id": "SAL2-425", "priority": "Low",  "status": "Backlog",     "title": "Fix meet_watcher false positive: 'found N files but extracted 0 items'" },
-      { "id": "SAL2-375", "priority": "Low",  "status": "Backlog",     "title": "Dedupe stale Notion Task Queue entries" }
+      { "id": "SAL2-458", "priority": "High", "status": "Backlog", "title": "Connect the Supabase GitHub integration — preview branches replay zero migrations without it" },
+      { "id": "SAL2-455", "priority": "High", "status": "In Progress", "title": "Migration history reconciled; branching still broken, now blocked on SAL2-458" },
+      { "id": "SAL2-19",  "priority": "High", "status": "Todo", "title": "Renew GitHub token — expired 2026-08-06, overdue" },
+      { "id": "SAL2-434", "priority": "High", "status": "Backlog", "title": "Rotate SALTY_CRM_WEBHOOK_SECRET — exposed in plaintext in a transcript" },
+      { "id": "SAL2-363", "priority": "High", "status": "Backlog", "title": "Rotate SUPABASE_SERVICE_ROLE_KEY and Apple dev/dist certs" },
+      { "id": "SAL2-345", "priority": "High", "status": "Backlog", "title": "Audit every secret in Doppler salty-v2/prd against dev" },
+      { "id": "SAL2-445", "priority": "Medium", "status": "Blocked", "title": "Automated load testing — needs a working branch/staging target" },
+      { "id": "SAL2-417", "priority": "High", "status": "Backlog", "title": "Restore Kanban view, description preview and min-score slider on /pipeline" },
+      { "id": "SAL2-372", "priority": "High", "status": "Backlog", "title": "Revise beta feedback survey" },
+      { "id": "SAL2-446", "priority": "None", "status": "Backlog", "title": "Check salty-admin for the same login bug as salty-crm" },
+      { "id": "SAL2-366", "priority": "Medium", "status": "Backlog", "title": "Manual ticket-add cannot create past events, future only" },
+      { "id": "SAL2-352", "priority": "Medium", "status": "Backlog", "title": "Close PostHog event-tracking gaps" }
     ]
   },
   "knownGaps": [
-    "eventsday.php returns no venue field, so the venue-anchored path resolves through home team only",
+    "Preview branches replay zero migrations — the project has no GitHub integration connected (SAL2-458)",
+    "Branch status reports MIGRATIONS_PASSED over an empty database; assert on table count, never status",
+    "eventsday.php returns no venue field, so the venue-anchored sports path resolves through home team only",
     "A right-country but wrong-venue game can still slip through on the team-anchored path",
-    "Tickets with venue 'TBD' cannot use any venue-based signal",
-    "23 of 93 sports tickets remain unresolved, mostly non-team events or titles naming no resolvable team"
+    "23 of 93 sports tickets remain unresolved, mostly non-team events or titles naming no resolvable team",
+    "Eight admin/ops tables reach prod from outside this repo, so schema arrives from more than one source"
   ]
 }
