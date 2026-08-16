@@ -5,11 +5,12 @@ import { TicketActivityChart } from '@/components/charts/ticket-activity-chart'
 import { CategoryDonutChart } from '@/components/charts/category-donut-chart'
 import { CATEGORY_EMOJI } from '@/lib/categories'
 import { countPendingImportUsers } from '@/lib/pending-imports'
+import { loadActivation } from '@/lib/analytics'
 import { ClickableRow } from '@/components/ui/clickable-row'
 import {
   Users, Ticket, MailOpen, Import, Wifi,
   TrendingUp, TrendingDown,
-  UserPlus, AlertTriangle, ShieldAlert, Settings, ChevronRight,
+  UserPlus, AlertTriangle, ShieldAlert, Settings, ChevronRight, Activity,
 } from 'lucide-react'
 
 // ─── Data helpers ──────────────────────────────────────────────────────────────
@@ -53,6 +54,7 @@ async function getDashboardData() {
     { data: recentAuditLog },
     { count: approved24 },
     { count: rejected24 },
+    activation,
   ] = await Promise.all([
     db.from('users').select('*', { count: 'exact', head: true }),
     db.from('tickets').select('*', { count: 'exact', head: true }),
@@ -75,6 +77,9 @@ async function getDashboardData() {
       .order('created_at', { ascending: false }).limit(5),
     db.from('pending_imports').select('*', { count: 'exact', head: true }).eq('status', 'approved').gte('created_at', dayAgo),
     db.from('pending_imports').select('*', { count: 'exact', head: true }).eq('status', 'rejected').gte('created_at', dayAgo),
+    // Unfiltered on the dashboard: this is the at-a-glance all-time picture. The filtered,
+    // cohort-based view lives on /analytics.
+    loadActivation({ days: null, category: '', source: '' }),
   ])
 
   // ── Ticket activity by month ─────────────────────────────────────────
@@ -168,6 +173,7 @@ async function getDashboardData() {
     recentUsers: recentUsers ?? [],
     rejectRate24,
     reviewed24,
+    activation,
   }
 }
 
@@ -314,6 +320,63 @@ export default async function DashboardPage() {
           </ul>
         </div>
       )}
+
+      {/* ── Activation ──
+          The counts below say how big the platform is. These say whether it is working: a user
+          with no tickets got no value from it, and capture is the whole product. */}
+      <div className="overflow-hidden rounded-[14px] border border-salty-border bg-warm-white">
+        <div className="flex items-center gap-2 border-b border-salty-border px-5 py-3">
+          <Activity className="h-4 w-4 text-ember" />
+          <h2 className="font-sora text-[14px] font-bold text-salty-text">Activation</h2>
+          <Link href="/analytics" className="ml-auto text-[12px] font-medium text-ember hover:underline">
+            Full analytics →
+          </Link>
+        </div>
+        <div className="grid grid-cols-2 gap-px bg-salty-border sm:grid-cols-3 lg:grid-cols-5">
+          {[
+            {
+              label: 'Activated',
+              value: d.activation.totalUsers > 0
+                ? `${Math.round((d.activation.withTicket / d.activation.totalUsers) * 100)}%`
+                : '—',
+              sub: `${d.activation.withTicket} of ${d.activation.totalUsers} have a ticket`,
+              tone: '#E8581A',
+            },
+            {
+              label: 'Retained',
+              value: d.activation.withTicket > 0
+                ? `${Math.round((d.activation.with2Plus / d.activation.withTicket) * 100)}%`
+                : '—',
+              sub: `${d.activation.with2Plus} have 2+ tickets`,
+              tone: '#3E8A5A',
+            },
+            {
+              label: 'Inbox connected',
+              value: d.activation.withInbox.toLocaleString(),
+              sub: 'gmail · imap · forward',
+              tone: '#3A72A8',
+            },
+            {
+              label: 'Active · 7d',
+              value: d.activation.seen7d.toLocaleString(),
+              sub: `${d.activation.seen30d} in 30d`,
+              tone: '#C8A96E',
+            },
+            {
+              label: 'Tickets / user',
+              value: String(d.activation.avgTicketsPerActive),
+              sub: 'among activated users',
+              tone: '#7C3AED',
+            },
+          ].map((s) => (
+            <div key={s.label} className="bg-warm-white p-4">
+              <p className="text-[11px] font-semibold uppercase tracking-[0.05em] text-salty-muted">{s.label}</p>
+              <p className="mt-1 font-sora text-[20px] font-bold leading-none" style={{ color: s.tone }}>{s.value}</p>
+              <p className="mt-1 text-[11px] text-salty-muted">{s.sub}</p>
+            </div>
+          ))}
+        </div>
+      </div>
 
       {/* ── KPI row ── */}
       <div className="grid grid-cols-2 gap-4 lg:grid-cols-5">

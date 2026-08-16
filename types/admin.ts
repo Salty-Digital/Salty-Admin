@@ -3,6 +3,8 @@ export interface AdminUser {
   email: string
   full_name: string | null
   access_level: 1 | 2 | 3 | 4
+  /** Per-admin page allowlist (hrefs). null = unrestricted; see lib/pages.ts canAccessPage(). */
+  allowed_pages: string[] | null
   is_active: boolean
   invited_by: string | null
   last_login_at: string | null

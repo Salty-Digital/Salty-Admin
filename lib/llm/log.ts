@@ -80,7 +80,65 @@ export interface LlmCallRow {
   created_at: string
 }
 
-/** Raw calls in a window, newest first. Bounded — the dashboard aggregates in JS. */
+export interface LlmCostRollup {
+  operation: string
+  model: string
+  provider: string
+  calls: number
+  failures: number
+  tokens: number
+  cost_usd: number
+  p95_ms: number | null
+}
+
+export interface LlmCostDay {
+  day: string
+  cost_usd: number
+  calls: number
+}
+
+const n = (v: unknown): number => (v == null ? 0 : Number(v))
+
+/**
+ * Per-(operation, model) spend rollup, aggregated in Postgres.
+ *
+ * NOT derived from loadLlmCalls: PostgREST caps a response at db-max-rows (1000 on this project)
+ * regardless of .limit(), so reducing rows in JS silently reports "the most recent 1000 calls"
+ * instead of the window. That is the same trap 015_count_pending_import_users documents, and it
+ * is a worse failure here because the number still looks plausible — it just under-reports spend.
+ */
+export async function loadLlmCostSummary(sinceDays: number): Promise<LlmCostRollup[]> {
+  const db = createServiceClient()
+  const { data } = await db.rpc('get_llm_cost_summary', { p_days: sinceDays })
+  return ((data ?? []) as Record<string, unknown>[]).map((r) => ({
+    operation: String(r.operation),
+    model: String(r.model),
+    provider: String(r.provider),
+    calls: n(r.calls),
+    failures: n(r.failures),
+    tokens: n(r.tokens),
+    cost_usd: n(r.cost_usd),
+    p95_ms: r.p95_ms == null ? null : Number(r.p95_ms),
+  }))
+}
+
+/** Daily spend for the trend strip, aggregated in Postgres (zero-spend days included). */
+export async function loadLlmCostDaily(sinceDays: number): Promise<LlmCostDay[]> {
+  const db = createServiceClient()
+  const { data } = await db.rpc('get_llm_cost_daily', { p_days: sinceDays })
+  return ((data ?? []) as Record<string, unknown>[]).map((r) => ({
+    day: String(r.day),
+    cost_usd: n(r.cost_usd),
+    calls: n(r.calls),
+  }))
+}
+
+/**
+ * Raw calls in a window, newest first.
+ *
+ * Use ONLY for bounded row listings (e.g. recent failures) where the limit is far below the
+ * 1000-row PostgREST cap. For any total, use loadLlmCostSummary — see the note there.
+ */
 export async function loadLlmCalls(sinceDays: number, limit = 5000): Promise<LlmCallRow[]> {
   const db = createServiceClient()
   const since = new Date(Date.now() - sinceDays * 86_400_000).toISOString()

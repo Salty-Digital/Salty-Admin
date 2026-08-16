@@ -1,0 +1,1454 @@
+{
+  "generatedAt": "2026-08-16T15:35:12.054Z",
+  "repos": {
+    "mobile": {
+      "path": "salty-mobile",
+      "role": "Expo app + every edge function + the database schema"
+    },
+    "admin": {
+      "path": "Salty-Admin",
+      "role": "Next.js control plane reading the same Supabase project"
+    }
+  },
+  "edgeFunctions": [
+    {
+      "name": "artist-search",
+      "purpose": "Cached across warm invocations of the same isolate - avoids requesting a new app token on every autocomplete keystroke. Spotify client-credentials tokens last 1h; the client_id/secret are app-level, no per-user login required.",
+      "hasCore": true,
+      "providers": [
+        "spotify",
+        "musicbrainz",
+        "ticketmaster"
+      ]
+    },
+    {
+      "name": "ask-memory",
+      "purpose": "APP_KNOWLEDGE, the system prompt, the summary builders, parseClaudeResponse, and the rate-limit/retry helpers all live in ./core.ts (testable, imported above).",
+      "hasCore": true,
+      "providers": [
+        "anthropic"
+      ]
+    },
+    {
+      "name": "backfill-sports-stats",
+      "purpose": "ONE-OFF backfill of the historical sports backlog. enrich-sweep deliberately skips imports older than 30 days (API-quota guard), so the pre-existing ~50 un-resolved sports tickets never got a game. This resolves them by driving sports-score-lookup for every active sports ticket that still has no sport_api_id — no import-date cutoff. Batched + randomized so repeated calls make progress even when some tickets are genuinely unresolvable. Idempotent: a resolved ticket drops out. Runs inside the edge runtime so it can use SERVICE_ROLE_JWT (which a session can't). Trigger it repeatedly (with the anon key) until { remaining: 0 }.",
+      "hasCore": false,
+      "providers": []
+    },
+    {
+      "name": "check-artist-alerts",
+      "purpose": "Scope to calling user when invoked from the app (user JWT provided)",
+      "hasCore": false,
+      "providers": [
+        "ticketmaster"
+      ]
+    },
+    {
+      "name": "classify-calendar-events",
+      "purpose": "Hard cap on candidates classified per request so a pathological calendar can't run up an unbounded Anthropic bill. Anything beyond this is kept (is_event=true) without AI — the keyword filter already vetted it and it still lands in the review queue.",
+      "hasCore": true,
+      "providers": [
+        "anthropic"
+      ]
+    },
+    {
+      "name": "classify-event-photos",
+      "purpose": "Pure, runtime-agnostic core for classify-event-photos — no Deno/network imports, so it runs under jest (see core.test.ts). index.ts keeps the Claude vision call, the duplicate guard, and the pending_imports insert; the tool schema, prompt, guardrails, and payload shaping live here. This is slice 2 of concert/show discovery (SAL2-390). A night-event cluster (buildNightEventClusters) sends a representative photo here; the model decides whether it's a real live event and names the performer + venue. Every result is still user- reviewed before it becomes a ticket, so the guardrails favour PRECISION — reject unless we have a confident, named, live-event scene. A wrong \"you went to X\" card is worse than a missed one.",
+      "hasCore": true,
+      "providers": [
+        "anthropic"
+      ]
+    },
+    {
+      "name": "classify-trip-segment",
+      "purpose": "Lowercased city token — the part before the first comma. \"Chicago, IL\" and \"Chicago, Illinois\" both normalize to \"chicago\" so duplicate cards collapse.",
+      "hasCore": true,
+      "providers": [
+        "anthropic"
+      ]
+    },
+    {
+      "name": "config-status",
+      "purpose": "Read-only \"which secrets are set\" endpoint for the Salty admin panel's Config Status page. Returns ONLY presence booleans + the names of other configured secrets — never a secret VALUE. Gated by a shared secret (x-config-secret) so only the admin panel, which holds CONFIG_STATUS_SECRET, can call it. This is the same shared-secret pattern as feedback-to-airtable; verify_jwt is off because auth is the shared-secret header, not a Supabase JWT.",
+      "hasCore": false,
+      "providers": []
+    },
+    {
+      "name": "daily-digest",
+      "purpose": "Route every digest through send-notification (via notifyUser): it writes the inbox row, honors the new_detections preference, multicasts to all of a user's devices, and counts the",
+      "hasCore": true,
+      "providers": []
+    },
+    {
+      "name": "delete-account",
+      "purpose": "Storage's list() only returns one level at a time, and ticket-photos nests userId/ticketId/assetId/... several levels deep, so walk it depth-first. Folder entries come back with id: null; real objects have a populated id.",
+      "hasCore": false,
+      "providers": []
+    },
+    {
+      "name": "disconnect-gmail",
+      "purpose": "Disconnect-gmail: truly revokes the user's Gmail grant at Google AND removes the stored connection. This is what backs the in-app \"Disconnect Gmail\" action and the revocation promise in our Terms / Google Limited Use compliance.",
+      "hasCore": false,
+      "providers": []
+    },
+    {
+      "name": "disconnect-imap",
+      "purpose": "Disconnect-imap: removes the stored IMAP connection row, including the encrypted app password. IMAP providers do not offer a standard token revoke endpoint, so deletion is the only server-side credential destruction step.",
+      "hasCore": false,
+      "providers": []
+    },
+    {
+      "name": "enrich-cast",
+      "purpose": "Same 200-shaped body, but flagged as an OUTAGE rather than \"this show's cast is unknown\". The client ignores the flag (it only reads `cast`); the enrichment worker uses it to back off and retry instead of marking the job done. Without it an Anthropic 429 is indistinguishable from a genuine no-answer, and a real theatre show converges to \"no cast\" permanently — the same empty-vs-throttled trap documented in the worker's runGeocode. Mirrors enrich-lineup.",
+      "hasCore": true,
+      "providers": []
+    },
+    {
+      "name": "enrich-cast-cron",
+      "purpose": "Server-side sweep that backfills \"Cast & Creative\" for theatre tickets. WHY THIS EXISTS: cast enrichment used to be client-on-demand ONLY — the event-details screen called enrich-cast when a theatre ticket had no cast. So any theatre ticket never opened in-app on a cast-enabled build stayed empty forever (in prod, 20 of 25 theatre tickets had zero cast). This runs server-side on a schedule and enriches every theatre ticket regardless of how it was created (gmail / imap / photo / manual / calendar). It does the SAME enrichment as enrich-cast INLINE (Wikidata grounding + Claude + the is_known guard, via the shared ./core.ts) rather than calling enrich-cast over HTTP: that hop 401'd at the gateway because enrich-cast is verify_jwt=true and a service-role Bearer isn't accepted there. Doing it inline with the service client also needs no per-ticket ownership check (this is a trusted backfill)",
+      "hasCore": true,
+      "providers": []
+    },
+    {
+      "name": "enrich-lineup",
+      "purpose": "Same 200-shaped body, but flagged as an OUTAGE rather than \"this festival is genuinely unknown\". The client ignores the flag (it only reads `lineup`); the enrichment worker uses it to back off and retry instead of marking the job done. Without this the two cases are indistinguishable — an Anthropic 429 would permanently converge a real festival to \"no lineup\", which is exactly the empty-vs-throttled trap documented in the worker's runGeocode.",
+      "hasCore": true,
+      "providers": []
+    },
+    {
+      "name": "enrich-sweep",
+      "purpose": "Scheduled enrichment sweep. Finds a small batch of PAST tickets still missing their admin-triggerable enrichment (sports results, theatre cast) and invokes the existing lookup functions for each — the same thing the app does lazily on view and the admin panel does on demand, but proactively on a cron so data stays fresh without anyone opening the ticket. Idempotent and capped, so it's safe to run often.",
+      "hasCore": false,
+      "providers": []
+    },
+    {
+      "name": "enrichment-worker",
+      "purpose": "The single enrichment worker — drains the enrichment_jobs queue for every kind. See 20260813230000_enrichment_pipeline.sql for the why. Each tick: discover work (enqueue_enrichment_jobs), then per kind claim a small PACED batch and run its handler, marking each job done (attempted — data found or definitively none) or a transient retry. Because a 429 / 5xx becomes a backed-off retry rather than a \"done\", a burst can never silently mark a resolvable item unresolved, and the per-kind batch caps keep us under every provider's rate limit. Adding an enrichment kind = one handler here + one INSERT in enqueue_enrichment_jobs(). Phase 1 covers geocode (reuses geocode-venues/core.ts) and sports_result (drives sports-score-lookup). Auth: verify_jwt=false (config.toml) + shared x-cron-secret.",
+      "hasCore": false,
+      "providers": [
+        "nominatim",
+        "photon",
+        "thesportsdb",
+        "anthropic"
+      ]
+    },
+    {
+      "name": "event-details",
+      "purpose": "Pure, runtime-agnostic core for event-details — no Deno/network imports, so it runs under jest (see core.contract.test.ts). index.ts keeps only the HTTP handler, env/key handling, and the Ticketmaster fetch.",
+      "hasCore": true,
+      "providers": [
+        "ticketmaster"
+      ]
+    },
+    {
+      "name": "events-at",
+      "purpose": "Given a photo cluster's DATE + TIME + GPS, ask Ticketmaster \"what event happened here then?\" and, if one lines up confidently, create the discovered-event card. This is the cross-verification finder for concert/show discovery (SAL2-390): photos are matched to a CONFIRMED real event by date/time/location, not to a name guessed off the image. When nothing matches (or there's no GPS) the caller falls back to visual identification.",
+      "hasCore": true,
+      "providers": [
+        "ticketmaster",
+        "nominatim",
+        "setlistfm",
+        "anthropic"
+      ]
+    },
+    {
+      "name": "feedback-to-airtable",
+      "purpose": "Destination: \"Beta Users Feedback\" base → Feedback table (created via the Airtable MCP). These IDs are not secret. The PAT (AIRTABLE_API_KEY) and the shared webhook secret are.",
+      "hasCore": true,
+      "providers": []
+    },
+    {
+      "name": "geocode-cron",
+      "purpose": "Server-side geocoding sweep — the permanent fix for tickets that never got venue coordinates. ROOT CAUSE it fixes: geocode-venues was ONLY triggered opportunistically (a photo scan, or opening the map) and is RLS-scoped to one user. A ticket created through any of the six creation paths (gmail / forward / calendar / photo-import / manual / event-details) whose owner never hit one of those paths stayed at null coordinates forever — in prod, 81 well-named venues across every source had no coordinates. This sweep geocodes every active ticket with a venue and no coordinates, for ALL users, on a schedule, so it is self-healing for existing AND future tickets. pg_cron -> trigger_geocode_sweep() -> pg_net POST -> here -> tickets_needing_geocode() -> per-venue Nominatim lookup (reuses geocode-venues/core.ts verbatim) -> update coords. Auth: verify_jwt=false (pinned in config.toml); the only cred",
+      "hasCore": false,
+      "providers": []
+    },
+    {
+      "name": "geocode-venues",
+      "purpose": "Fetch tickets that still need geocoding",
+      "hasCore": true,
+      "providers": []
+    },
+    {
+      "name": "monthly-recap",
+      "purpose": "Bare route name (no leading slash): both tap handlers — app/_layout.tsx and NotificationsScreen — resolve a bare value to /(tabs)/memories, where the monthly recap card lives. A leading slash would break that resolution.",
+      "hasCore": true,
+      "providers": []
+    },
+    {
+      "name": "notify-event-photos",
+      "purpose": "Push + inbox when a friend adds photos to an event's shared album (retention Phase 3b). Called by the UPLOADER's client once per manual-upload batch (useEventDetails). Gated three ways so it can only reach the right people: (1) the uploader must be SHARING event photos — otherwise co-attendees literally can't see them, so a \"come look\" push would be a dead end; (2) friendship; (3) shared attendance (the recipient has their own ticket for the same canonical event). Deduped to one alert per (adder, recipient, event) via sent_event_photo_alerts, so re-uploading to the same album doesn't re-ping. verify_jwt stays TRUE (default): the caller's JWT is required for the gates. NOT in config.toml.",
+      "hasCore": false,
+      "providers": []
+    },
+    {
+      "name": "notify-message",
+      "purpose": "Push + inbox notification for a new direct message. Called by the SENDER's client right after inserting a message. We authenticate the caller, confirm they and the recipient are accepted friends (mirroring the direct_messages insert RLS, so this can't be used to spam strangers), then hand off to send-notification which writes the inbox row, respects the user's notification_preferences, and sends the Expo push when a token exists.",
+      "hasCore": false,
+      "providers": []
+    },
+    {
+      "name": "notify-status",
+      "purpose": "Push + inbox when a friend posts an event status (retention Phase 3, social loop). Statuses update live in-app via a realtime subscription (modules/status/hooks/useStatuses.ts), but a friend who isn't looking never learns a co-attendee posted a moment from a show they were both at. Called by the POSTER's client right after inserting the status. Gated on BOTH friendship AND shared attendance (the recipient must have their own ticket for the same canonical event) — so this can only reach people who were actually there, never broadcast a status to strangers. verify_jwt stays TRUE (default): the caller's JWT is required for the friendship check, exactly like notify-message. Do NOT add this function to config.toml's verify_jwt=false list.",
+      "hasCore": false,
+      "providers": []
+    },
+    {
+      "name": "notify-tag-prompt",
+      "purpose": "Push a \"tag your friend\" nudge when a new ticket overlaps a friend's event. Client-invoked by the NEW ticket's owner right after creating it (mirrors notify-message). We authenticate the caller, confirm they own the (active, titled) ticket, and — only if the owner's OWN privacy allows being surfaced (mirroring suggest_event_attendees: allow_tagging + share_events + not only_me) — notify each accepted friend who already has the SAME event and isn't already linked to it. \"Same event\" is the canonical eventDedupeKey (shared catalog event_id, else title + DAY), NOT a raw lowercased title — the exact match public.suggest_event_attendees uses. A raw title match both over-fired (a friend's SAME show on a DIFFERENT date got a bogus \"you're both going\" push — the \"Dave went to Hamilton on a different date\" report) and under-fired (a \"TICKET:\"-prefixed or reformatted title missed a real overlap). ",
+      "hasCore": false,
+      "providers": []
+    },
+    {
+      "name": "read-playbill",
+      "purpose": "Fetch the uploaded playbill image and base64-encode it for the vision message.",
+      "hasCore": true,
+      "providers": []
+    },
+    {
+      "name": "receive-forwarded-email",
+      "purpose": "Forward-to-Scan webhook (Phase 0). Resend receives a forwarded ticket email at <token>@<inbound-domain> and POSTs an `email.received` event here. We verify the Svix signature, map the token to a user, fetch the full body from Resend (the webhook only carries metadata), and run it through the same parse/insert pipeline as a Gmail scan. Deploy with --no-verify-jwt: the caller is Resend, not a user — auth IS the signature. Required secrets: RESEND_WEBHOOK_SECRET, RESEND_API_KEY, INBOUND_EMAIL_DOMAIN (e.g. \"abc123.resend.app\"), plus the standard SUPABASE_URL / SUPABASE_SERVICE_ROLE_KEY.",
+      "hasCore": true,
+      "providers": []
+    },
+    {
+      "name": "relabel-event",
+      "purpose": "Auto-relabel an imported ticket whose title isn't the real event (\"parking pass only\" → \"PSG vs Real Madrid\"). Looks up what happened at the ticket's venue on its date via Ticketmaster (geo + date), and if the real event's name meaningfully differs from what the user saved, renames the ticket — preserving the original title. Fire-and-forget from enrichTicketImage; idempotent (skips once original_title is set).",
+      "hasCore": true,
+      "providers": [
+        "nominatim",
+        "ticketmaster"
+      ]
+    },
+    {
+      "name": "run-scheduled-scans",
+      "purpose": "How many deadline-windows to drain per inbox per dispatch, so a large mailbox catches up within one tick instead of one page per 15-minute cron. Each round resumes the persisted sweep cursor (the scan functions are resumable + idempotent), so this is safe to repeat.",
+      "hasCore": false,
+      "providers": []
+    },
+    {
+      "name": "saved-event-reminders",
+      "purpose": "saved-event-reminders — \"your saved event is coming up\" nudges AND best-effort price-drop alerts. Daily cron. (1) Saved events within a few days → one reminder each (sent_saved_event_reminders). (2) Future saved events with a baseline price → re-check the current price via ticket-price-lookup and, on a meaningful drop, alert once (sent_price_drop_alerts). Both go through the notifyUser hub (saved_event_reminders preference + daily cap). Price checks are paced + capped (TM rate limits; TM omits prices on many events, so this is best-effort). Auth: verify_jwt=false (config.toml) + shared x-cron-secret.",
+      "hasCore": true,
+      "providers": []
+    },
+    {
+      "name": "scan-gmail",
+      "purpose": "─── Types ────────────────────────────────────────────────────────────────────",
+      "hasCore": true,
+      "providers": []
+    },
+    {
+      "name": "scan-imap",
+      "purpose": "@deno-types=\"npm:@types/node\"",
+      "hasCore": false,
+      "providers": [
+        "anthropic"
+      ]
+    },
+    {
+      "name": "scan-photo",
+      "purpose": "Stronger vision model, used ONLY as a one-shot escalation for a weak-but-ticket read (see shouldEscalateExtraction). Mirrors the Haiku→Sonnet pattern in enrich-cast / enrich-lineup.",
+      "hasCore": true,
+      "providers": [
+        "anthropic"
+      ]
+    },
+    {
+      "name": "send-child-invite",
+      "purpose": "Deployed https landing base that bridges the emailed link to the app (see web/claim/). Unset ⇒ the email falls back to the raw \"salty://\" scheme (not tappable in most mail clients) — set this once the landing page is live so recipients get a tappable link.",
+      "hasCore": true,
+      "providers": []
+    },
+    {
+      "name": "send-notification",
+      "purpose": "Fatigue guard: at most this many *re-engagement* pushes per user per UTC day. Transactional pushes (DMs, tags, friend requests, scan results) never set capReengagement, so they're exempt. Over the cap we still write the inbox row (content stays discoverable in-app) but skip the push.",
+      "hasCore": false,
+      "providers": []
+    },
+    {
+      "name": "setlist-lookup",
+      "purpose": "Fallback when setlist.fm has no data: ask Claude for a representative setlist. Returned songs are flagged source:'ai' so the client can label them as predicted.",
+      "hasCore": true,
+      "providers": [
+        "anthropic",
+        "phishnet",
+        "setlistfm"
+      ]
+    },
+    {
+      "name": "sports-result-cron",
+      "purpose": "Server-side sports RESULT sweep — the missing third enrichment sweep (theatre cast and venue coords already have one; this completes the set). ROOT CAUSE it fixes: a game's result/score is only fetched by sports-score-lookup, which ran OPPORTUNISTICALLY (client-side, when the event was opened), and the general enrich-sweep skips imports older than 30 days (API-quota guard). So any past game whose event was never opened — especially older imports — never got a score. In prod, 38 past sports tickets had no result. This resolves every past sports ticket with no result yet, for ALL users, on a schedule. pg_cron -> trigger_sports_result_sweep() -> pg_net POST -> here -> sports_tickets_needing_result() -> per-ticket sports-score-lookup (reused verbatim, driven with SERVICE_ROLE_JWT). CONVERGENCE: sports-score-lookup writes NO row on a no-match, so a naive \"no stats row\" query would re-hit an u",
+      "hasCore": false,
+      "providers": []
+    },
+    {
+      "name": "sports-roster-lookup",
+      "purpose": "Pure, runtime-agnostic core for sports-roster-lookup - no Deno/network imports, so it runs under jest (see core.test.ts). index.ts keeps only the HTTP handler, auth, and TheSportsDB fetch orchestration; all logic lives here.",
+      "hasCore": true,
+      "providers": [
+        "thesportsdb"
+      ]
+    },
+    {
+      "name": "sports-score-lookup",
+      "purpose": "v1 hook only. SportRadar splits coverage by sport into separate trial APIs (NBA/NFL/MLB/NHL/Soccer/...), each with its own endpoint, key, and competitor-ID scheme — there's no unified \"search by team name\" endpoint like TheSportsDB's searchevents.php. Determining which sport a ticket belongs to and mapping team names to SportRadar competitor IDs isn't implemented yet, so this always falls through to TheSportsDB. Setting SPORTRADAR_API_KEY currently has no effect.",
+      "hasCore": true,
+      "providers": [
+        "nba-stats",
+        "thesportsdb",
+        "mlb-statsapi",
+        "espn"
+      ]
+    },
+    {
+      "name": "spotify-export",
+      "purpose": "Diagnostic: report which Spotify account we actually signed in as, and whether the Web API (which dev-mode gates by the allowlist) accepts it.",
+      "hasCore": false,
+      "providers": [
+        "spotify"
+      ]
+    },
+    {
+      "name": "store-email-connection",
+      "purpose": "The scopes Google actually granted this access token, per its tokeninfo endpoint. Returns null when the scope can't be determined (token unusable or tokeninfo unreachable) — the caller treats \"positively missing\" and \"couldn't check\" differently.",
+      "hasCore": true,
+      "providers": []
+    },
+    {
+      "name": "streak-nudge",
+      "purpose": "streak-nudge — the monthly \"keep your streak alive\" push (retention Phase 2). The attendance streak (modules/profile/utils/attendanceStreak.ts) was a display-only value; this wires it to a push. Runs late in the month via pg_cron; for each user whose consecutive-month streak is alive-but-lapsing (attended last month, nothing yet this month, month nearly over) it sends one nudge. Fatigue-safe: sent_streak_nudges de-dupes to one push per user per month, and the notifyUser hub honors the streak_reminders preference (fail-open) + writes the in-app inbox row. Auth: verify_jwt=false (config.toml) + shared x-cron-secret — mirrors daily-digest / monthly-recap.",
+      "hasCore": true,
+      "providers": []
+    },
+    {
+      "name": "ticket-price-lookup",
+      "purpose": "TM's Discovery search list omits priceRanges on many events (tribute acts, resale, sold-out, and most sports — which use dynamic pricing), and only lists UPCOMING on-sale events, so scan a page of results for the first that actually carries a price range.",
+      "hasCore": true,
+      "providers": [
+        "ticketmaster"
+      ]
+    },
+    {
+      "name": "trending-events",
+      "purpose": "Resolve app category → TM params",
+      "hasCore": true,
+      "providers": [
+        "ticketmaster"
+      ]
+    },
+    {
+      "name": "venue-search",
+      "purpose": "Ticketmaster's venues endpoint covers arenas, stadiums, clubs and theatres worldwide and is already the app's event/attraction source, so a venue keyword resolves against the same catalogue the artist autocomplete uses.",
+      "hasCore": true,
+      "providers": [
+        "ticketmaster"
+      ]
+    },
+    {
+      "name": "verify-photos",
+      "purpose": "Set for high-confidence (score >= 0.75) metadata matches: the date+GPS evidence already cleared a strict bar, so we don't ask the model to re-litigate the match (that just invites false rejections of perfectly good matches). It still gets a full pass through this function — but ONLY for the privacy/sensitive-content screen. See the audit note above `verifyOne` for why this exists.",
+      "hasCore": false,
+      "providers": [
+        "anthropic"
+      ]
+    }
+  ],
+  "sharedModules": [
+    {
+      "name": "apiUsage.ts",
+      "purpose": "The external-API cost/health ledger (`api_usage_log`). Two entry points: logApiUsage(admin, entry) — the original, for callers that already hold a service-role client. trackedFetch(url, init, meta) — wraps one outbound provider call and records it. Use this for new instrumentation: it needs no client, so a function does not have to build a service-role client just to log, and a call site stays one line. This file deliberately imports NOTHING. `_shared` modules that jest loads must not pull in `https://esm.sh/...` (jest cannot resolve it), which is why logApiUsage takes an untyped `admin` and why trackedFetch talks to PostgREST over raw fetch — the same trick notify.ts uses."
+    },
+    {
+      "name": "confidence.ts",
+      "purpose": "Multi-signal confidence (beta #6). A single event can be evidenced by several INDEPENDENT sources — a Gmail/IMAP receipt, a device-calendar entry, a matched photo, an existing setlist. When more than one corroborates the SAME event, our confidence that it's real should climb toward certainty. We treat each source as independent evidence and combine with noisy-OR: combined = 1 - Π(1 - confidence_i) Two independent 0.7 signals → 0.91; three mid signals → ~0.94; a lone 0.55 stays 0.55. This is what pushes corroborated events toward the 90-100% the beta wants, while a single weak signal stays low. Repeated hits from the SAME source collapse to their strongest single confidence first (two Gmail emails for one show are one piece of evidence, not two)."
+    },
+    {
+      "name": "contentAlert.ts",
+      "purpose": "Build the push/inbox copy for a post-event content alert. Pure — no side effects, no I/O — so the exact wording is unit-tested. `eventTitle` is the ticket title (e.g. \"Phish at MSG\"); a blank/unknown title falls back to a neutral phrase rather than an empty string."
+    },
+    {
+      "name": "crypto.ts",
+      "purpose": "AES-256-GCM application-layer encryption for credentials stored at rest (Gmail OAuth tokens, IMAP passwords). The key lives only in the edge-function runtime (TOKEN_ENCRYPTION_KEY secret), never in the database — so a DB dump or a leaked row reveals only ciphertext. Satisfies CASA Tier 2 / OWASP ASVS V6 (cryptographic storage of sensitive data). ── Key rotation ────────────────────────────────────────────────────────────── Rotating the key used to be silently destructive. Every stored value was \"enc:v1:<data>\" with no record of WHICH key produced it, and only one key was ever loaded — so the moment TOKEN_ENCRYPTION_KEY changed, every existing credential became permanently undecryptable, and the only symptom was `OperationError: Decryption failed` deep in a scan function. That is exactly what happened on 2026-08-08: six mailbox credentials died at once and it took reading edge-function lo"
+    },
+    {
+      "name": "eventFields.ts",
+      "purpose": "Remove a junk \"TICKET:\"-style lead, preserving the rest verbatim (case + spacing)."
+    },
+    {
+      "name": "imapAllowlist.ts",
+      "purpose": "Throws if the host/port is not an approved IMAP endpoint. Call before persisting or connecting to a user-supplied IMAP host."
+    },
+    {
+      "name": "imapError.ts",
+      "purpose": "A rich, credential-safe one-line diagnostic for an IMAP / ImapFlow error. scan-imap used to record only `err.message`, which for ImapFlow is the generic \"Command failed\" on almost every failure. That cannot tell a REVOKED / wrong app password (`authenticationFailed`, code AUTHENTICATIONFAILED) from a TLS / network fault (ETIMEDOUT, ECONNREFUSED, …) — so a Yahoo connection that failed every scheduled scan for two weeks left `scan_runs.error_message = \"IMAP connection failed: Command failed\"` and nobody could see why. ImapFlow carries the real cause in PROPERTIES, and its error `response`/`responseText` are the SERVER's reply lines (e.g. \"NO [AUTHENTICATIONFAILED]\"), never the password the client sent — so they are safe to persist. Same lesson as store-email-connection/core.ts's errorText(): read the properties, not just `.message`."
+    },
+    {
+      "name": "notify.ts",
+      "purpose": "Server-side push + in-app inbox notification. send-notification always writes the `notifications` inbox row first and only then consults notification_preferences, so a user who muted the push still finds it in the app. We keep that contract rather than pre-filtering here. The gateway runs send-notification with verify_jwt=true, so we authenticate with the service-role key. Its auth.getUser() resolves to no user for a service-role caller, which the send path explicitly allows (only the delete path needs a real user). `screen` follows the app's routing convention (see app/_layout.tsx and NotificationsScreen): a bare name resolves under the tab group (\"tickets\" -> /(tabs)/tickets), a leading slash routes as-is (\"/review-imports\")."
+    },
+    {
+      "name": "priceExtract.ts",
+      "purpose": "Extract the total PAID from receipt-style text. Prefers an explicitly labeled grand/order total; rejects bare integers (\"Total items: 3\"); picks the largest labeled amount (grand total ≥ subtotals/fees). Returns nulls when nothing convincing is found — a wrong price is worse than none."
+    },
+    {
+      "name": "searchCache.ts",
+      "purpose": "Best effort only; search must still work when cache writes fail."
+    }
+  ],
+  "migrations": [
+    {
+      "repo": "salty-mobile",
+      "file": "00000000000000_remote_schema.sql",
+      "summary": ""
+    },
+    {
+      "repo": "salty-mobile",
+      "file": "00000000000001_auth_user_triggers.sql",
+      "summary": "auth.users triggers that mirror auth users into public.users and sync last-seen. These live in the `auth` schema on prod, so a public-only schema dump doesn't capture them — without this migration a fresh/local DB never populates public.users on signup, breaking any FK to public.users (e.g. tickets.user_id). Recreated here (verbatim from prod) so the repo builds a complete, prod-equivalent schema."
+    },
+    {
+      "repo": "salty-mobile",
+      "file": "20260707170000_scan_schedules.sql",
+      "summary": "Server-side source of truth for the Scheduled Scan feature (client writes here; the run-scheduled-scans cron reads here). Timezone-aware so a user's \"9:00 AM\" fires in their local time."
+    },
+    {
+      "repo": "salty-mobile",
+      "file": "20260707170500_enable_scheduled_scan_cron.sql",
+      "summary": "Enables the every-15-minutes server-side scheduled inbox scan. pg_cron -> trigger_scheduled_scans() -> pg_net POST -> run-scheduled-scans edge function -> due_scan_user_ids() -> per-user scan-gmail / scan-imap. The shared secret lives in Vault as 'scan_cron_secret' and is created OUT-OF-BAND (not in this migration, so the secret never lands in the repo) via: select vault.create_secret('<CRON_SECRET value>', 'scan_cron_secret'); It must match the CRON_SECRET edge-function secret. Mirrors the feedback_to_airtable webhook."
+    },
+    {
+      "repo": "salty-mobile",
+      "file": "20260709120000_setlists_owner_write_policies.sql",
+      "summary": "Allow a ticket owner to save/confirm their own setlist from the client. The setlist-lookup edge function writes via service role (bypasses RLS); these policies let the owner upsert (INSERT + UPDATE) a user-edited setlist directly."
+    },
+    {
+      "repo": "salty-mobile",
+      "file": "20260709121000_tickets_add_rating.sql",
+      "summary": "Per-event star rating (1-5) the owner can set on a ticket/memory. Nullable: most tickets are unrated. Owner writes are already covered by the existing tickets update RLS policy, so no new policy is needed."
+    },
+    {
+      "repo": "salty-mobile",
+      "file": "20260709130000_enable_daily_digest_cron.sql",
+      "summary": "Daily \"tickets to review\" digest. pg_cron -> trigger_daily_digest() -> pg_net POST -> daily-digest edge function (stale pending_imports >24h -> inbox + push). Reuses the same Vault secret ('scan_cron_secret') and edge CRON_SECRET as the scheduled-scans job, so no new secret is introduced. Runs daily at 17:00 UTC."
+    },
+    {
+      "repo": "salty-mobile",
+      "file": "20260710120000_event_statuses.sql",
+      "summary": "Event-anchored statuses (\"stories\") — see modules/status/*. A status always references a real ticket/event; the event fields are denormalized at insert time (mirrors the denormalized `tickets` table) so a viewer never needs a join and the card survives the ticket being deleted."
+    },
+    {
+      "repo": "salty-mobile",
+      "file": "20260710160000_events_tm_event_id.sql",
+      "summary": "Store a resolved Ticketmaster Discovery event id on scanned events so the status/friend-ticket \"buy\" flow (lib/eventNavigation.ts) can deep-link to the exact event instead of re-running a fuzzy keyword search every time. Populated lazily (write-through on first tap) and proactively at ticket creation (lib/enrichTicketImage.ts). Distinct from `external_id`, which the Ticketmaster-sourced discover flow already uses."
+    },
+    {
+      "repo": "salty-mobile",
+      "file": "20260711120000_security_pii_lockdown.sql",
+      "summary": "Security hardening: stop PII over-exposure on public.users and lock down anon-callable SECURITY DEFINER data functions. Before: the `users_select_authenticated` policy let ANY signed-in user read EVERY column of EVERY user row -- including email, phone_number, zip_code and push_token. And `find_users_by_phones` / `get_public_ticket_stats` (both SECURITY DEFINER, so they bypass RLS) were callable by the `anon` role, whose key ships inside the app and is trivially extractable -> phone->identity scraping and attendance enumeration with no account required."
+    },
+    {
+      "repo": "salty-mobile",
+      "file": "20260712120000_optimize_rls_initplan_and_lock_internal_functions.sql",
+      "summary": "Performance + hardening pass (Supabase advisors). 1) auth_rls_initplan: RLS policies that call auth.uid()/is_active_admin() per-row are wrapped in a scalar subselect so the planner evaluates them once per query instead of once per row. Semantics are identical. 2) Revoke the REST RPC EXECUTE grant on trigger-only functions that were never meant to be callable directly (finished in the companion migration 20260712121000, which revokes from PUBLIC -- the grant these functions actually hold; revoking from anon/authenticated alone is a no-op)."
+    },
+    {
+      "repo": "salty-mobile",
+      "file": "20260712121000_revoke_public_execute_on_trigger_functions.sql",
+      "summary": "Lock down trigger-only SECURITY DEFINER functions from the REST RPC surface. handle_new_user() and sync_last_seen_at() are fired by triggers, never called by the client. Their EXECUTE grant is held via PUBLIC (not anon/authenticated directly), so the companion migration's revoke-from-anon/authenticated was a no-op. Revoke from PUBLIC so they can no longer be invoked over /rest/v1/rpc/*. Triggers run as the function owner and do not require EXECUTE, so trigger behavior is unaffected."
+    },
+    {
+      "repo": "salty-mobile",
+      "file": "20260714120000_explicit_share_ticket_privacy.sql",
+      "summary": "Explicit-share friend privacy: connecting with someone no longer auto-shares ALL of your events. Previously `friends_can_view_tickets` let any accepted friend SELECT every one of a user's tickets. Now a friend can view a ticket only if they were explicitly tagged/shared on it (a ticket_attendees row with user_id = them). Own tickets stay visible via tickets_select_own."
+    },
+    {
+      "repo": "salty-mobile",
+      "file": "20260714183000_friend_profile_stats.sql",
+      "summary": "Friend profile stats. The explicit-share privacy change (20260714120000_explicit_share_ticket_privacy.sql) correctly stopped a friend from reading every one of your tickets, but the user profile screen computes its aggregate sections client-side from those same raw rows -- so they all collapsed to zero the moment someone accepted a friend request. That inverted the privacy model: a non-friend still gets full aggregates from get_public_ticket_stats (SECURITY DEFINER, so RLS never applies), while an accepted friend read the table directly and saw nothing. Accepting a request removed information from the screen. This returns the projection get_public_ticket_stats already exposes to any"
+    },
+    {
+      "repo": "salty-mobile",
+      "file": "20260714183500_mutual_event_counts.sql",
+      "summary": "Mutual event counts, same regression as get_friend_profile_stats: useFriends counted mutual events by reading a friend's ticket rows directly (.in('user_id', friendIds)), which the explicit-share RLS change reduced to zero rows -- so the \"Mutual\" stat on the friend profile, and the Friends tab, sat at 0 for everyone regardless of how many events two people had actually both attended. Only ever returns a COUNT of events the CALLER already has a ticket to, and only for accepted friends -- it cannot reveal an event the caller doesn't already know about, or anything at all about a non-friend."
+    },
+    {
+      "repo": "salty-mobile",
+      "file": "20260714190000_photos_shared_ticket_visibility.sql",
+      "summary": "Friends can see photos from SHARED events only -- never the rest of a user's photos. `photos` had exactly one SELECT policy, photos_select_own, so the friend profile's photo grid could never render for anyone: it queried a friend's photos and always got []. (Pre-existing; not caused by the explicit-share change.) Mirrors tickets_select_shared exactly, reusing the same helper: a photo is readable when its ticket is one you were explicitly tagged on. photos.ticket_id is NOT NULL, so every photo is covered by this rule -- there is no unattached \"library\" that could leak through. OR-ed with photos_select_own (permissive policies union), so: my own photos, plus photos on tickets explicitly shared"
+    },
+    {
+      "repo": "salty-mobile",
+      "file": "20260714200000_email_resumable_sweeps.sql",
+      "summary": "Resumable email sweeps. The original Gmail importer capped the first listMessages() pass at the 500 newest query matches, then saved gmail_history_id and switched every later scan to incremental history. For users with deep matching back-catalogues, older ticket emails were never fetched and then became permanently unreachable because incremental sync only sees new mail. Existing connections default initial_sweep_complete=false on purpose: their back-catalogue was not proven read under an uncapped algorithm, even if they already have a history cursor. We deliberately do NOT wipe gmail_history_id; it remains the right incremental cursor once the resumable sweep reaches the end."
+    },
+    {
+      "repo": "salty-mobile",
+      "file": "20260714203000_scan_runs.sql",
+      "summary": "Scan run audit trail. Missing email investigations currently have to infer scanner behavior from side effects: a rejected AI result leaves a row, while a keyword filter drop, fetch miss, or query miss often leaves nothing. That makes \"did Gmail return this message?\" indistinguishable from \"we fetched it and lost it later\" without ad hoc SQL across logs and provider state. This table records one compact row per email scan invocation. Edge functions use the service role for writes; users only get owner-scoped read access so support can expose/inspect scan history without widening access to another user's mail metadata."
+    },
+    {
+      "repo": "salty-mobile",
+      "file": "20260715204207_add_block_and_report_moderation.sql",
+      "summary": "Guideline 1.2 moderation: user blocks + content reports. Additive + guarded: is_blocked_with() returns false while user_blocks is empty, so the policy guards below are no-ops for all existing users until a block exists."
+    },
+    {
+      "repo": "salty-mobile",
+      "file": "20260718000000_import_source_values.sql",
+      "summary": ""
+    },
+    {
+      "repo": "salty-mobile",
+      "file": "20260718010000_friend_profile_stats_rating.sql",
+      "summary": "Adds `rating` to get_friend_profile_stats so a friend's profile can surface mutual taste (\"you both rated this 5 stars\"). Return-type changes cannot use CREATE OR REPLACE, so the function is dropped and recreated. The friendship gate, SECURITY DEFINER, STABLE and search_path are reproduced verbatim from the previous definition. The REVOKEs matter: Postgres grants EXECUTE to PUBLIC on newly created functions, and Supabase's default privileges additionally grant it to `anon` as a named role -- which REVOKE ... FROM PUBLIC does not remove. Both are needed to land on the original grant set (authenticated + service_role only)."
+    },
+    {
+      "repo": "salty-mobile",
+      "file": "20260718020000_notification_prefs_defaults.sql",
+      "summary": "Notification preferences were effectively implicit: 27 of 28 users had no row at all, and every send path fails open (daily-digest's `pushEligible` treats a missing pref as true; check-artist-alerts only skips when a row exists and is false). So those users were receiving pushes while Settings rendered every toggle OFF -- and flipping any single toggle wrote the whole row, silently setting the other channels to false and cutting off notifications the user had never chosen to disable. This migration removes the implicit state for NEW users. The backfill for existing users is deliberately a separate migration. Defaults are set to match what actually fires today, so behaviour is"
+    },
+    {
+      "repo": "salty-mobile",
+      "file": "20260718030000_notification_prefs_backfill.sql",
+      "summary": "STAGED -- NOT YET APPLIED. Writes notification state for existing real users, so it is held for deliberate sign-off rather than run alongside the schema change in 20260718020000. Every user without a preferences row is currently receiving event reminders, the new-detections digest and artist alerts, because all three send paths fail open on a missing row. This inserts the row that matches that existing behaviour, so applying it changes nothing about what anyone receives -- it only makes the implicit state explicit, which is what stops the Settings screen from lying and stops a single toggle from silently disabling other channels. Only rows that do not exist are written; anyone who has alread"
+    },
+    {
+      "repo": "salty-mobile",
+      "file": "20260718040000_monthly_recap_pref.sql",
+      "summary": "Monthly recap is a new unsolicited push, so it gets its own preference rather than riding on an existing channel. Defaults on, matching the other live channels set in 20260718020000; ADD COLUMN with a non-volatile default does not rewrite the table and fills existing rows, so the 25 backfilled rows pick it up without a second backfill."
+    },
+    {
+      "repo": "salty-mobile",
+      "file": "20260718050000_monthly_recap_cron.sql",
+      "summary": "Fires the monthly-recap edge function on the 1st of each month at 17:00 UTC, matching daily-digest's hour. Mirrors trigger_daily_digest exactly: the shared cron secret comes from the vault and travels in x-cron-secret, which is the function's only auth (it is deployed with verify_jwt disabled, like daily-digest, because pg_net sends no Authorization header)."
+    },
+    {
+      "repo": "salty-mobile",
+      "file": "20260718060000_friend_activity_default.sql",
+      "summary": "Corrects a regression from 20260718030000. That backfill classified friend_activity as having no send path and wrote false for every user, but send-notification mutes on an explicit false and useFriends invokes it with prefKey 'friend_activity' for both friend requests and acceptances. Before the backfill those users had no row at all, so the check fell through and the push was delivered — writing false silently switched friend notifications off. Every false here was written by that backfill or by the column default it left in place; the one user who set their own preferences already has true, so this restores the previous behaviour without overriding a real choice. setlist_available and pho"
+    },
+    {
+      "repo": "salty-mobile",
+      "file": "20260718070000_ticket_team_picks.sql",
+      "summary": "Which team you were rooting for is a personal opinion, but it was stored on sports_stats, which is UNIQUE (ticket_id) -- one row per ticket, holding objective game data (scores, lineups) fetched from the sports API. Two people at the same game therefore could not hold different picks, and because every sports_stats policy required tickets.user_id = auth.uid(), a tagged attendee's write was rejected outright. The client ignored the upsert result, so the pick silently reverted on refresh. Splitting the subjective pick into its own per-user table fixes both: each attendee picks independently, and win/loss stats follow their own pick."
+    },
+    {
+      "repo": "salty-mobile",
+      "file": "20260718080000_collection.sql",
+      "summary": "Backing for the Collection section on Following: the things a user cares about, split into what they already follow (favourites tier) and what they still want to see (wishlist). Deliberately extends followed_artists rather than starting a parallel table: it already carries a `type` discriminator, already drives Discover ranking via tasteRanking, and is already what check-artist-alerts watches for new shows. A favourite is a follow the user has starred, so it inherits all of that for free. `type` has no CHECK constraint, so venue/league/genre need no schema change -- only the client has to learn them."
+    },
+    {
+      "repo": "salty-mobile",
+      "file": "20260719000000_calendar_pending_uniq.sql",
+      "summary": "STAGED -- NOT APPLIED. Deletes duplicate rows belonging to real users, so it is held for explicit sign-off. Calendar dedup is read-then-write in the client: a scan reads pending_imports, decides what is new, then inserts. Two scans overlapping therefore both read before either writes and both insert the same events -- observed as 424 rows at 21:58:53 and 422 more at 21:58:56 for one account. The client now holds the scan single-flight, but a ref only guards one mounted component: it does not survive a remount, and does nothing about two devices scanning the same account. Gmail already solved this properly with pending_imports_gmail_msg_uniq. Calendar had no equivalent, so the database happil"
+    },
+    {
+      "repo": "salty-mobile",
+      "file": "20260721000000_allow_comedy_restaurant_categories.sql",
+      "summary": "Widening these CHECK constraints is additive: every existing permitted value, including dining, remains allowed, so applying this cannot invalidate existing rows."
+    },
+    {
+      "repo": "salty-mobile",
+      "file": "20260721010000_reset_known_bad_venue_geocodes.sql",
+      "summary": "Clear coordinates for two venues that were geocoded onto the wrong continent, so the geocoder can resolve them again now that it biases toward the user's other venues. Barclays Center is in Brooklyn and Red Bull Arena is in Harrison, NJ. Their stored coordinates landed on Barclays HQ in London and Red Bull Arena in Leipzig, because a bare ambiguous venue name was searched with no location hint and Nominatim ranks by global \"importance\". Matched by name plus a EUROPE bounding box rather than by coordinate equality. The first version of this migration compared against rounded literals (51.5050, 12.3482) while the stored values carry full precision (51.5050457, 12.3482361) — float equality matc"
+    },
+    {
+      "repo": "salty-mobile",
+      "file": "20260721020000_setlists_per_artist.sql",
+      "summary": "Store one setlist per act on a ticket. Existing rows remain artist NULL, meaning \"the ticket's own act\" (the headliner row the app already displayed)."
+    },
+    {
+      "repo": "salty-mobile",
+      "file": "20260722000000_shared_event_links.sql",
+      "summary": "Short codes for shared event links. A shared link used to carry the whole event in its query string, because the recipient does not own the ticket and RLS gives them nothing to load. That made a link ~220-310 characters. This stores the snapshot server-side and shares \"salty://e?s=<code>\" instead. Access is via SECURITY DEFINER functions only; the table itself is unreachable from the client. A plain RLS \"select where code = ...\" policy would NOT work: RLS filters rows, it does not require you to know a code, so any authenticated user could select the whole table. Knowing the code has to be the thing that returns the row, which means a function."
+    },
+    {
+      "repo": "salty-mobile",
+      "file": "20260722010000_scan_runs_outcome.sql",
+      "summary": "Make a failed scan visible. scan_runs existed to stop the scanner losing mail silently, but persistScanRun was called on the SUCCESS path only — in scan-imap, exactly once, at the end. Every failure return (missing auth, unauthorized, no connection, and both \"IMAP connection failed\" paths) returned before it. So the table recorded successes and nothing else. The cost of that was a real, un-diagnosable bug: a beta tester connected a Yahoo account, accepted the AI consent, the client fired the scan immediately, the scan failed, and nothing anywhere recorded why. imap_connections.last_synced_at stayed null while the card still read \"connected\", and scan_runs had zero IMAP rows — which looked li"
+    },
+    {
+      "repo": "salty-mobile",
+      "file": "20260722020000_photo_scan_jobs_failure.sql",
+      "summary": "Let a photo scan admit it failed. photo_scan_jobs is written in exactly two places in lib/usePhotoLibraryScanner.ts: created as 'running' (~L479) and updated to 'completed' (~L1143), roughly 660 lines apart. Between them the media-library scan can throw (~L833: logs, sets local UI state, RETURNS) or the user can cancel (~L842: RETURNS) — neither touches the job row — and the app can simply be killed or backgrounded, which has no code path at all. So a job that dies stays 'running' for ever. In prod that is 36 rows across 12 of 14 users, averaging 5 days old, one user having never completed a single scan. And because scanned_assets is only written at completion, every running row reads 0 scan"
+    },
+    {
+      "repo": "salty-mobile",
+      "file": "20260722030000_pending_imports_rejection_reason.sql",
+      "summary": "Say WHY an import was rejected. The email funnel in prod: 2469 emails listed -> 1376 pass the keyword filter -> AI rejects 632 as non-ticket and 23 fall under the confidence floor -> 706 deduplicated -> 15 reach a human. 885 pending_imports rows are 'rejected' and there is no column saying which of those four things happened to any of them. That matters because 223 DISTINCT events were rejected and 151 of them exist nowhere in the owning user's collection. Some of those are marketing mail the AI correctly binned. Some may be real tickets. Today nobody can tell which, so \"is email scanning good?\" is unanswerable — and every attempt to tune the keyword filter or the confidence floor is guesswo"
+    },
+    {
+      "repo": "salty-mobile",
+      "file": "20260722040000_release_photo_assets_on_archive.sql",
+      "summary": "Let a re-added ticket pull its photos back. Beta report: \"I deleted a manual Ticket after I loaded photos to it. I re-added ticket manually and now it won't pull photos in.\" Deleting a ticket is a SOFT delete (status -> 'archived'); its `photos` rows stay. The scanner is already correct about this — its already-handled set inner-joins tickets and excludes archived ones, so those assets become eligible again, and a single-ticket scan searches a window around the EVENT date rather than the incremental cursor, so age is not the problem either. The blocker was the index: photos_device_asset_id_key was UNIQUE (device_asset_id). One"
+    },
+    {
+      "repo": "salty-mobile",
+      "file": "20260723120000_forward_to_scan.sql",
+      "summary": "Forward-to-Scan (Phase 0) — docs/forward-to-scan-plan.md A per-user inbound email address so people can FORWARD ticket confirmations instead of connecting their whole inbox (only ~9% ever connect one). A forwarded email is parsed and inserted by the SAME pipeline as a Gmail scan, tagged source='forward'."
+    },
+    {
+      "repo": "salty-mobile",
+      "file": "20260723140000_inbound_token_username_format.sql",
+      "summary": "Human-readable inbound addresses: <username>-<6 hex> instead of 12 random hex chars, e.g. rahul-a1b2c3@<inbound-domain> rather than e3ad78b86126@<inbound-domain>. SECURITY NOTE: this address is BOTH the routing key and the write credential for an account — a forwarded mail lands in whichever account owns the address it was sent TO, regardless of who sent it (the From header is spoofable and is deliberately not used for routing). The username half is public, so the random suffix carries the entire secret. Keep a suffix on it; never reduce this to a bare username."
+    },
+    {
+      "repo": "salty-mobile",
+      "file": "20260725000000_gmail_scan_sender_domains.sql",
+      "summary": "Sender/domain picker (progressive consent for Gmail scanning). Which ticket-platform senders this user allows scan-gmail to read, chosen at the consent step (curated list in modules/tickets/utils/ticketSenders.ts). NULL (default) = no constraint: scan all trusted senders + subject matches, byte-identical to the pre-picker behavior, so every existing connection is unaffected. Stored on the connection row — not passed per request — so the scheduled (cron) scans honor the same choice as user-triggered ones."
+    },
+    {
+      "repo": "salty-mobile",
+      "file": "20260725000100_seatgeek_tickpick_sources.sql",
+      "summary": "SeatGeek + TickPick + Ticketmaster CSV import (ImportSongkickScreen order-history sources). A new source string always needs the CHECK constraint updated on BOTH tables (see 20260723120000_forward_to_scan.sql): pending_imports takes the row at import time, and tickets takes the same string verbatim at approval — miss either one and the flow fails at runtime with a constraint violation."
+    },
+    {
+      "repo": "salty-mobile",
+      "file": "20260725150000_photo_proposal_source_flags.sql",
+      "summary": "Two device-derived signals about each matched photo. On iOS the Photos app already maintains \"Favorites\" and \"Selfies\" smart albums; these flags carry that membership onto the proposal at scan time. is_favorite floats starred keepers to the top of the review list. is_selfie is a LABEL only — it never changes ranking (an event selfie is a keeper, not a throwaway); it just drives the scan's colour split and an optional \"hide selfies\" filter. Neither touches match_score. Default false, so every existing proposal (and every Android proposal, where these smart albums aren't exposed) ranks purely on match_score exactly as before."
+    },
+    {
+      "repo": "salty-mobile",
+      "file": "20260727120000_create_direct_messages.sql",
+      "summary": "1:1 direct messages between friends. Sends are RLS-gated to accepted friends and blocked across a user_block in either direction. Realtime-enabled so an open chat receives the other side's messages live."
+    },
+    {
+      "repo": "salty-mobile",
+      "file": "20260728120000_create_privacy_settings.sql",
+      "summary": "Per-user privacy preferences backing the Privacy settings page. Enforcement is applied in the app's read paths (user search, friend profile, friend tagging)."
+    },
+    {
+      "repo": "salty-mobile",
+      "file": "20260728202632_suggest_event_attendees.sql",
+      "summary": "Suggests friends who also have a ticket for the same event (matched by title) but are not yet tagged on the caller's ticket, so the owner can tag them and enable sharing. SECURITY DEFINER so it can see friends' tickets (RLS otherwise hides them), but it only ever returns rows for a ticket the CALLER owns and respects each friend's privacy: they must allow tagging, share their events, and not run an only_me archive. privacy_settings rows are sparse, so absent settings coalesce to the permissive defaults."
+    },
+    {
+      "repo": "salty-mobile",
+      "file": "20260728210000_child_profiles.sql",
+      "summary": ""
+    },
+    {
+      "repo": "salty-mobile",
+      "file": "20260728211000_ticket_attendees_child_id.sql",
+      "summary": "Child attendee rows represent private kid tags under the ticket owner's account. They must not inherit the friend-visible branch used by normal user attendee rows."
+    },
+    {
+      "repo": "salty-mobile",
+      "file": "20260728220000_child_claim_invites.sql",
+      "summary": ""
+    },
+    {
+      "repo": "salty-mobile",
+      "file": "20260728230000_child_claim_redeem.sql",
+      "summary": "Time-capsule hand-over: preview + redeem. A parent-created child_claim_invites token lets the child (on a brand-new account of their own) inherit copies of the parent's tickets the child was tagged in. Age/consent policy is enforced at account creation (the normal Salty sign-up), not here."
+    },
+    {
+      "repo": "salty-mobile",
+      "file": "20260728240000_redeem_transfer_photos.sql",
+      "summary": "Extend the time-capsule redeem so the child also inherits the PHOTOS on the tickets they were tagged in — not just the events. We loop per source ticket so each new ticket keeps its own photos; both photo rows point at the same object in the public `ticket-photos` bucket, so nothing is re-uploaded. Device-only photos (no storage_url) are skipped — they live on the parent's device and can't follow the child."
+    },
+    {
+      "repo": "salty-mobile",
+      "file": "20260730120000_ticket_original_title.sql",
+      "summary": "Preserve the user's original ticket title when auto-relabel renames an imported event to its canonical real-event name (see supabase/functions/relabel-event). Additive + nullable — existing rows and queries are unaffected; NULL means \"never relabeled\"."
+    },
+    {
+      "repo": "salty-mobile",
+      "file": "20260801150329_add_search_cache.sql",
+      "summary": "No policies: only the service role, which bypasses RLS, reads/writes this shared, non-user-specific cache; users never touch it."
+    },
+    {
+      "repo": "salty-mobile",
+      "file": "20260801150330_add_ticket_scan_image.sql",
+      "summary": ""
+    },
+    {
+      "repo": "salty-mobile",
+      "file": "20260802120000_add_setlists_set_time.sql",
+      "summary": "Owner-entered stage start time per act (setlist row). Nullable, additive. Applied out-of-band via apply_migration per supabase/migrations/README.md (db push errors on drift)."
+    },
+    {
+      "repo": "salty-mobile",
+      "file": "20260802130000_add_feedback_demographics.sql",
+      "summary": "Optional demographic fields on feedback (age group, gender, how they heard about Salty). Nullable, additive. Applied out-of-band via apply_migration per supabase/migrations/README.md. These sync to the \"Beta Users Feedback\" Airtable base via the feedback-to-airtable edge fn."
+    },
+    {
+      "repo": "salty-mobile",
+      "file": "20260803191544_add_fk_covering_indexes.sql",
+      "summary": "Perf advisor (unindexed_foreign_keys): add covering indexes for every foreign key that lacked one. Speeds up joins and FK/RLS lookups; all additive and reversible. Applied to prod via Supabase MCP apply_migration (version 20260803191544); this file keeps the local migration history in sync (no types/db.ts change — indexes only)."
+    },
+    {
+      "repo": "salty-mobile",
+      "file": "20260803192206_optimize_rls_initplan_dm_privacy_inbound.sql",
+      "summary": "Perf advisor (auth_rls_initplan): wrap auth.uid() in (select auth.uid()) so it is evaluated once per query (as an initplan) instead of once per row. Semantics-preserving. Covers the policies added after the earlier initplan sweeps (direct_messages, privacy_settings, inbound_email_addresses). ALTER POLICY (not drop/recreate) so no policy is ever momentarily absent. Applied to prod via Supabase MCP apply_migration (version 20260803192206); this file keeps the local migration history in sync (no types/db.ts change — policy bodies only)."
+    },
+    {
+      "repo": "salty-mobile",
+      "file": "20260803192941_consolidate_duplicate_permissive_policies.sql",
+      "summary": "Perf advisor (multiple_permissive_policies): each (table, role, action) below had two PERMISSIVE policies, so both were evaluated per row. Permissive policies are OR'd, so merging each pair into a single policy with the conditions OR'd is exactly equivalent. Expressions are copied verbatim (including the (select auth.uid()) initplan form) and OR'd. One transaction, so RLS is never left with a coverage gap. Applied to prod via Supabase MCP apply_migration (version 20260803192941); this file keeps the local migration history in sync (no types/db.ts change — policy bodies only)."
+    },
+    {
+      "repo": "salty-mobile",
+      "file": "20260803193724_drop_redundant_pending_imports_all_policy.sql",
+      "summary": "Perf advisor (multiple_permissive_policies): pending_imports had a FOR ALL policy (\"Users manage own pending imports\") duplicating the per-action pending_*_own policies (all \"(select auth.uid()) = user_id\"), so every action had two permissive policies. The four per-action policies cover the same access command-for-command (INSERT via WITH CHECK; SELECT/DELETE via USING; UPDATE via USING, whose value a null WITH CHECK inherits), so the FOR ALL is fully redundant. Drop it — no access change. Applied to prod via Supabase MCP apply_migration (version 20260803193724). Verified: expanding FOR ALL across its 4 actions, no (table, action, role) has >1 permissive policy anywhere in the public schema."
+    },
+    {
+      "repo": "salty-mobile",
+      "file": "20260803194121_drop_duplicate_friendships_unique_constraint.sql",
+      "summary": "Perf advisor (duplicate_index): friendships had two identical UNIQUE constraints on (requester_id, addressee_id): friendships_unique_pair and unique_friendship. Neither is referenced by any foreign key (verified via pg_depend), so dropping one is safe — the other still enforces the pair's uniqueness. Keep friendships_unique_pair, drop the dup. Applied to prod via Supabase MCP apply_migration (version 20260803194121); this file keeps the local migration history in sync. No types/db.ts change (constraint/index only)."
+    },
+    {
+      "repo": "salty-mobile",
+      "file": "20260805000000_suggest_tag_prompts.sql",
+      "summary": "Aggregate version of suggest_event_attendees: across ALL of the caller's owned active tickets, list friends who also have the same event (matched by normalized title) but aren't tagged yet, so the app can proactively prompt \"tag them\". SECURITY DEFINER because RLS hides other users' tickets; privacy predicates mirror suggest_event_attendees exactly (allow_tagging + share_events + not only_me)."
+    },
+    {
+      "repo": "salty-mobile",
+      "file": "20260805120000_allow_edm_category.sql",
+      "summary": "Add 'edm' as a selectable ticket/event category (beta feedback rec4Sq0: \"Add Comedy and EDM to types\" — Comedy already landed 2026-07-21, EDM was missing). category is constrained by a CHECK on BOTH tickets and events. They must stay in lockstep: creating/mirroring the event row for an EDM ticket would otherwise violate events_category_check. 'dining' is kept for the legacy alias already in the constraint; the client normalizes 'dining' -> 'restaurant'."
+    },
+    {
+      "repo": "salty-mobile",
+      "file": "20260808154514_pending_imports_dedup_key_idempotency.sql",
+      "summary": "Pillar 3 (scan-pipeline permanent fix): make \"no duplicate review row\" a DB guarantee. dedup_key = canonical per-user event fingerprint (dedupeTitleKey|dayKey), computed by supabase/functions/_shared/eventFields.dedupKey at ingest. Ingestion paths insert with ON CONFLICT DO NOTHING, so a re-scan/re-sweep can't create a duplicate. NULL (title-less rows, and paths not yet adopting the key) is left unconstrained because NULLs are distinct."
+    },
+    {
+      "repo": "salty-mobile",
+      "file": "20260808164557_ingestion_health_view.sql",
+      "summary": "Pillar 4.1: one observable ingestion surface. Unions the latest scan_runs row per (user, source) — gmail / imap / forward — with the latest photo_scan_jobs row per user (mapped to source='photo'), so \"did the last scan work for this user, and where did the funnel drop off?\" is answerable in one place. Admin/service-role diagnostics only."
+    },
+    {
+      "repo": "salty-mobile",
+      "file": "20260808165511_email_scan_durability.sql",
+      "summary": "Pillar 4.2a: head-of-line stall guard for the IMAP full sweep. A message that permanently fails to fetch holds the sweep cursor (correct: it prevents silent loss), but forever = a silent STALL that blocks all newer mail. This counter lets the scanner force-advance past a persistently stuck batch after a threshold (a recorded dead-letter), trading a few lost messages for an unblocked sweep. Reset to 0 on any progress, so the common path never sees it."
+    },
+    {
+      "repo": "salty-mobile",
+      "file": "20260808165624_scan_cron_health_refine.sql",
+      "summary": "Refine scan_cron_health: separate the true \"cron down\" signal (NO run of any outcome recently — the scheduler itself stopped) from \"no recent success\" (runs happen but none succeed, usually just nobody-connected). Prod had 385 no_connection gmail rows, which showed the original single `stale` flag conflated the two. Drop+recreate because column order changes."
+    },
+    {
+      "repo": "salty-mobile",
+      "file": "20260808170737_photo_scan_health_view.sql",
+      "summary": "Pillar 4.4: population-level photo-scan health (the parallel to scan_cron_health for email). Per-user latest jobs already show in ingestion_health (4.1); this aggregates outcome distribution + the \"stuck running\" count across all jobs, so a reaper regression (rows left 'running' forever — the exact class photoScanJobPatch exists to end) is visible at a glance. The processed-asset set is already durable (derived server-side from photos + reviewed pending_imports), so no per-device ledger is needed to prevent reinstall re-floods. Admin/service-role diagnostics only (aggregates across all users; no user_id)."
+    },
+    {
+      "repo": "salty-mobile",
+      "file": "20260808170833_photo_scan_server_reaper.sql",
+      "summary": "Pillar 4.4: server-side abandoned-photo-scan reaper. The existing reaper is client-triggered (runs only when a user starts a NEW scan), so a job abandoned by a user who never returns stays 'running' forever — prod already showed 28 such rows. This hourly sweep applies the SAME 6h threshold server-side, making photo-scan durability independent of the user coming back."
+    },
+    {
+      "repo": "salty-mobile",
+      "file": "20260808180624_rename_gemini_consent_to_scan_consent.sql",
+      "summary": "Rename gmail_connections.gemini_consent -> scan_consent (the AI-parsing consent is no longer Gemini-specific). RENAME COLUMN preserves the type/default/NOT NULL (boolean NOT NULL DEFAULT false). Applied to prod out-of-band as migration 20260808180624 by a concurrent change; this file records it so the repo's migration history matches prod and a from-scratch build lands it. NOTE: this migration and its client-code half (useTickets/TicketsScreen/types/db.ts, which read and write this column by name) MUST ship together — the DB was renamed ahead of the code once, which made the current build read a column that no longer existed."
+    },
+    {
+      "repo": "salty-mobile",
+      "file": "20260808181656_imap_connections_oauth.sql",
+      "summary": "Pillar 5.2: OAuth (XOAUTH2) support for IMAP, so Outlook/Hotmail/Live — which lost password auth when Microsoft retired Basic Auth — can connect. Mirrors gmail_connections' token storage. Backwards-compatible: existing rows are password auth; oauth rows carry encrypted tokens instead."
+    },
+    {
+      "repo": "salty-mobile",
+      "file": "20260809140657_ticket_attendees_status.sql",
+      "summary": "Tag acceptance (docs/tag-accept-plan.md, phase 2): a status on each attendee row so a tagged user can accept/decline. Default 'accepted' grandfathers every existing tag (and any insert predating the pending flow) — nothing needs re-accepting. New tags will explicitly insert 'pending' (phase 3)."
+    },
+    {
+      "repo": "salty-mobile",
+      "file": "20260809151500_tickets_category_allow_talk.sql",
+      "summary": "The 'talk' category (ticketed talks/lectures/conferences) was added to the app (lib/categories.ts) but never to this CHECK, so every write with category='talk' — manual add, event edit, review-import, photo-scan — was silently rejected by the DB. Add it. 'dining' stays for legacy rows even though the app no longer offers it."
+    },
+    {
+      "repo": "salty-mobile",
+      "file": "20260809160000_users_add_school.sql",
+      "summary": "Beta request: \"Need to add College / Alma Mater\". A free-text profile field on the user, surfaced through the existing public_profiles read path (non-sensitive, meant to be shared)."
+    },
+    {
+      "repo": "salty-mobile",
+      "file": "20260809170000_app_release_gate.sql",
+      "summary": "Remote \"please update\" gate. One row per platform; the team bumps latest_build when a new build ships (and min_build to force-update below a floor). The client compares its running build number and shows a prompt. Seeded inert (0/0) so it never prompts until configured."
+    },
+    {
+      "repo": "salty-mobile",
+      "file": "20260809173000_app_release_gate_seed_and_self_report.sql",
+      "summary": "Current release links + the known-latest ios build. GREATEST so re-applying never LOWERS a value the self-report below may have already raised."
+    },
+    {
+      "repo": "salty-mobile",
+      "file": "20260809174500_app_release_gate_seed_android_build.sql",
+      "summary": "Android's current build is versionCode 24. GREATEST so re-applying (or a self-report that already raised it) is never lowered."
+    },
+    {
+      "repo": "salty-mobile",
+      "file": "20260810120000_cast_enrichment_sweep.sql",
+      "summary": "Permanent, self-healing \"Cast & Creative\" enrichment for theatre tickets. ROOT CAUSE it fixes: cast enrichment was ONLY client-on-demand — the event-details screen called enrich-cast when a theatre ticket had no cast. Any theatre ticket never opened in-app on a cast-enabled build therefore stayed empty forever (in prod, 20 of 25 theatre tickets had zero cast). This adds a server-side sweep so every theatre ticket — existing and future, from ANY source (gmail / imap / photo / manual / calendar) — gets enriched automatically. pg_cron -> trigger_enrich_cast_sweep() -> pg_net POST -> enrich-cast-cron edge fn -> theater_tickets_needing_cast() -> per-ticket enrich-cast (reused verbatim). Shared se"
+    },
+    {
+      "repo": "salty-mobile",
+      "file": "20260810190000_schedule_enrich_sweep_cron.sql",
+      "summary": "Proactively enrich recently-imported past tickets every 6 hours by calling the enrich-sweep edge function via pg_net. enrich-sweep finds past sports/theatre tickets (imported in the last 30 days) still missing their result/cast and runs the lookups — the same work the app does lazily on view, but ahead of time so data stays fresh. The Authorization bearer is the PUBLIC anon key (already shipped in the mobile client bundle); enrich-sweep does its privileged work with its own service-role env + the SERVICE_ROLE_JWT function secret. cron.schedule is idempotent (upsert by job name). To disable: select cron.unschedule('enrich-sweep-6h');"
+    },
+    {
+      "repo": "salty-mobile",
+      "file": "20260811173003_tag_suggestion_event_aware.sql",
+      "summary": "Tag suggestions matched a friend's event to the caller's by TITLE ONLY (lower(trim(title))): a friend who saw the SAME show on a DIFFERENT date was wrongly suggested (beta: \"friend tagging isn't taking date into account — Dave went to Hamilton on a different date\"), and a \"TICKET:\"-prefixed title never matched its clean twin. Match instead on the canonical event identity — a shared catalog event_id, else normalized title + DAY — mirroring the client lib/eventTitle.eventDedupeKey. Also stop suggesting a friend we ALREADY share this event with in EITHER direction (they're tagged on ours, or we're tagged on theirs) — the \"already on the ticket\" report."
+    },
+    {
+      "repo": "salty-mobile",
+      "file": "20260811182625_share_event_photos_and_pooled_album.sql",
+      "summary": "Shared event photo album (beta: \"i don't see his photos\"). Two co-attendees of the same event each keep their own ticket; the event view pools everyone's photos. A new privacy toggle (share_event_photos, OFF by default) governs whether YOUR event photos are visible to attendees. NOTE: the pooling RPC below is friend-scoped in the immediately following migration (20260811182851_get_event_gallery_media_friend_scope) — this first cut treated any co-owner of the same event as an attendee, which could leak photos to a stranger who logged the same event."
+    },
+    {
+      "repo": "salty-mobile",
+      "file": "20260811182851_get_event_gallery_media_friend_scope.sql",
+      "summary": "Friend-scope the pooled album: a co-attendee's photos are only pooled when they are an ACCEPTED FRIEND of the caller (and sharing). Otherwise two strangers who independently logged the same event would leak photos to each other. Matches \"for friends, event-photo visibility is a privacy setting\" — own photos always; a friend's same-event photos only if they turned sharing on."
+    },
+    {
+      "repo": "salty-mobile",
+      "file": "20260811183449_event_gallery_media_require_storage_url_for_others.sql",
+      "summary": "A co-attendee's photo can only render on MY device if it has a storage_url (an uploaded asset); their local-only device_asset_id resolves to nothing here and would paint a broken cell. My OWN photos stay included even when local (MediaLibrary resolves them by device_asset_id)."
+    },
+    {
+      "repo": "salty-mobile",
+      "file": "20260811190500_event_gallery_media_return_uploader.sql",
+      "summary": "Return the uploader (uploader_id) so the event gallery can group photos by who took them (beta: Chris — \"it should separate the photos by person... what photos you took, what photos whoever took\"). Named uploader_id, not user_id, so the OUT column can't clash with the qualified photos.user_id references in the body. Everything else is unchanged from the friend-scoped version. DROP first: changing a function's return-row type isn't allowed by CREATE OR REPLACE."
+    },
+    {
+      "repo": "salty-mobile",
+      "file": "20260811193000_friends_going_to_event.sql",
+      "summary": "Friends who ALSO hold a ticket for the same UPCOMING event as the caller's ticket, so both can be notified \"you're both going\" (beta: Chris — notify when a friend is going to the same event, \"without spamming every friend on every purchase\"). Non-spammy by construction: it only ever matches on the same event identity, never broadcasts a purchase to all friends. SECURITY DEFINER to see friends' tickets (RLS hides them); returns rows only for a ticket the CALLER owns, only for an upcoming event, and respects each friend's privacy (share_events, not only_me). Matches on event identity (event_match_key: shared event_id, else title|day) like the tag-suggestion RPCs, not raw title."
+    },
+    {
+      "repo": "salty-mobile",
+      "file": "20260811200000_sports_stats_lineup.sql",
+      "summary": "Who actually played in the game (TheSportsDB's lineup endpoint, premium v2 with v1 fallback) — Chris's \"click on the players\". Normalized array of { name, position, team, home, substitute, photo, playerId }. Nullable: coverage is strong for soccer, sparse for US sports, so most rows stay null and the UI omits the \"Who played\" section."
+    },
+    {
+      "repo": "salty-mobile",
+      "file": "20260811203000_games_seen_with_player.sql",
+      "summary": "The caller's own + accepted-tagged games whose stored lineup includes this player — powers \"games you saw them in\" on the player bio card (the cross-game payoff for tappable lineups). SECURITY DEFINER to read sports_stats/tickets past RLS, but gated to auth.uid()'s OWN games only, so it never leaks another user's attendance."
+    },
+    {
+      "repo": "salty-mobile",
+      "file": "20260811210000_sports_stats_box_score.sql",
+      "summary": "Per-player box score for a game (statsapi.mlb.com for baseball — keyless, official, has the per-player batting/pitching lines TheSportsDB lacks). Array of { playerId:'mlb:<id>', name, team, home, kind:'batter'|'pitcher', position, order, line, + structured stats for aggregation }."
+    },
+    {
+      "repo": "salty-mobile",
+      "file": "20260811211500_mlb_player_stats_with_you.sql",
+      "summary": "Batting totals for a player across the caller's OWN + accepted-tagged games (from stored box scores) — \"how many HRs did I see Jeter hit\". SECURITY DEFINER to read past RLS, gated to the caller's games only. Batting-focused (the HR/hit ask); a pure pitcher returns games=0."
+    },
+    {
+      "repo": "salty-mobile",
+      "file": "20260811213000_player_stat_totals.sql",
+      "summary": "Sport-agnostic cross-game totals for a box-score player across the caller's OWN + accepted-tagged games: sums every numeric key in each entry's `stats` object (hr/h/rbi for MLB; pts/reb/ast for NBA; g/a/sog for NHL; passYds/rushTD… for NFL). Replaces the batting-only mlb_player_stats_with_you. SECURITY DEFINER, gated to the caller's games only."
+    },
+    {
+      "repo": "salty-mobile",
+      "file": "20260811214500_sports_stats_highlight_clips.sql",
+      "summary": "Per-play highlight clips for a game (MLB content API / ESPN videos — both keyless). Array of { title, url, thumb }. Fetched alongside the box score, so box_score_checked_at also gates this."
+    },
+    {
+      "repo": "salty-mobile",
+      "file": "20260813210000_geocode_sweep.sql",
+      "summary": "Permanent, self-healing venue geocoding for tickets. ROOT CAUSE it fixes: geocode-venues was ONLY triggered opportunistically (a photo scan, or opening the map) and is RLS-scoped to one user, so a ticket created through any of the six creation paths (gmail / forward / calendar / photo-import / manual / event-details) whose owner never hit one of those flows kept null coordinates forever — in prod, 81 well-named venues across EVERY source had no coordinates. This adds a server-side sweep so every active ticket with a venue and no coordinates — existing AND future, from ANY source — gets geocoded automatically. pg_cron -> trigger_geocode_sweep() -> pg_net POST -> geocode-cron edge fn -> ticket"
+    },
+    {
+      "repo": "salty-mobile",
+      "file": "20260813220000_sports_result_sweep.sql",
+      "summary": "Permanent, self-healing sports RESULT resolution for tickets — the third enrichment sweep (theatre cast = enrich-cast-sweep, venue coords = geocode-sweep, sports results = this). ROOT CAUSE it fixes: a game's score is only fetched by sports-score-lookup, which ran OPPORTUNISTICALLY (client-side on event open), and enrich-sweep skips imports >30 days old (API-quota guard). Any past game whose event was never opened — especially older imports — never got a result. In prod, 38 past sports tickets had no result (the bulk of the admin's \"pending\"). pg_cron -> trigger_sports_result_sweep() -> pg_net POST -> sports-result-cron edge fn -> sports_tickets_needing_result() -> per-ticket sports-score-lo"
+    },
+    {
+      "repo": "salty-mobile",
+      "file": "20260813230000_enrichment_pipeline.sql",
+      "summary": "UNIFIED ENRICHMENT PIPELINE — the permanent fix for the recurring \"a derived field never got filled\" class of bug (venue coords, sports results, cast, setlist, price, ...). ROOT CAUSE (hit three times): every derived field is fetched OPPORTUNISTICALLY, client-side, when someone opens the event. Anything never opened (or imported long ago) stays incomplete, and we kept bolting on a bespoke cron per enrichment (geocode-sweep, sports-result-sweep, enrich-cast- sweep) — whack-a-mole, and every manual backfill re-throttled an external API. THE FIX: one queue + one worker. Work is DISCOVERED server-side for every incomplete ticket (no trigger on the hot tickets-insert path — a periodic enqueue is "
+    },
+    {
+      "repo": "salty-mobile",
+      "file": "20260813240000_enrichment_cast_setlist.sql",
+      "summary": "Fold cast + setlist into the enrichment pipeline (20260813230000). Adds two discovery predicates to enqueue_enrichment_jobs() and retires the standalone enrich-cast-sweep cron (its edge fns stay deployed but idle) — the enrichment-worker now handles cast (drives enrich-cast) and setlist (drives setlist-lookup) alongside geocode + sports_result. Nothing else changes; convergence and pacing are the pipeline's."
+    },
+    {
+      "repo": "salty-mobile",
+      "file": "20260813250000_enrichment_verify.sql",
+      "summary": "Add the `verify` enrichment kind: cross-verify a photo/physical-scanned ticket against its RETAINED source image and reconcile improve-only (fill missing / fix low-confidence, never overwrite a confident value). Only photo-sourced tickets with a stored ticket-photos image qualify; source_verified_at makes it run once per ticket."
+    },
+    {
+      "repo": "salty-mobile",
+      "file": "20260813260000_canonical_event_identity.sql",
+      "summary": "============================================================================ Phase 0 — Canonical event identity foundation Promote the thin, gmail-populated `events` table into a canonical event that many tickets can point at, so enrichment (Phase 1+) attaches ONCE per real event instead of once per ticket. This migration establishes IDENTITY only: • a stored canonical key (trusted strong id, else fuzzy title|day), • a merge pointer for later re-keying, • a find-or-create resolver + a batched backfill. No enrichment moves and no user-facing behavior changes here. Identity was validated read-only against live data before writing this:"
+    },
+    {
+      "repo": "salty-mobile",
+      "file": "20260813270000_event_sibling_copy.sql",
+      "summary": "============================================================================ Phase 1 — Sibling-copy enrichment dedup (setlist + cast) The FIRST ticket at a canonical event pays the external enrichment cost; every later sibling ticket at the SAME event copies that result instead of hitting setlist.fm / phish.net / Wikidata / Anthropic again. This is the read-through cache's core win, delivered without moving storage or touching the client: the enrichment worker calls these BEFORE its external fetch and skips it on a hit. Fill-on-miss only (never upgrades an existing enrichment) — convergence and user-correction propagation are Phase 2. Resolving the event as a side effect also links any not-y"
+    },
+    {
+      "repo": "salty-mobile",
+      "file": "20260813280000_repair_setlistfm_id.sql",
+      "summary": "============================================================================ Repair: NULL non-unique setlist.fm ids (unsafe as a per-show dedup key) setlists.setlistfm_id must identify exactly ONE real show for the canonical event work to key on it. Legacy rows — attached before setlist-lookup gained its artistNameMatches guard — put a real setlist on the WRONG artist: e.g. SOFI TUKKER's setlist 637082ef (its 12 songs) landed on Twenty One Pilots, Oasis, and Nine Inch Nails tickets, so one id spans four unrelated events. Rule: NULL every setlistfm_id that maps to MORE THAN ONE canonical event (event_canonical_key = title|day). Genuinely-shared ids on duplicate tickets of a SINGLE show (e.g. "
+    },
+    {
+      "repo": "salty-mobile",
+      "file": "20260813290000_event_sibling_copy_sports_geo.sql",
+      "summary": "============================================================================ Phase 2 (step 1) — extend sibling-copy dedup to sports_result + geocode Same win as the Phase 1 setlist/cast copy: the FIRST ticket at a canonical event pays the external cost, later siblings copy. No client changes — the enrichment worker calls these before its external fetch and skips it on a hit. ============================================================================"
+    },
+    {
+      "repo": "salty-mobile",
+      "file": "20260813300000_event_readthrough_rpcs.sql",
+      "summary": "============================================================================ Phase 2 (step 2) — read-through RPCs for setlist + cast The client reads a ticket's setlist/cast THROUGH its canonical event, so a user-edited setlist (or a scanned playbill cast) converges to every attendee of the same show — not just the ticket it was entered on. RLS on setlists / ticket_cast is strictly own-ticket, so these SECURITY DEFINER RPCs do their own access check (caller must own or be tagged on the ticket) and pool only across own-or-attended tickets at the event (the connected-attendee boundary). Ranking picks ONE canonical source ticket: a user edit wins (convergence), then the caller's own row (so set"
+    },
+    {
+      "repo": "salty-mobile",
+      "file": "20260813310000_event_strong_id_reconcile.sql",
+      "summary": "============================================================================ Phase 3 (step 1) — strong-id re-keying + merge An event is first created under a FUZZY title|day key (at scan/resolve time, before enrichment). Later, enrichment reveals a reliable STRONG id — the TheSportsDB game id, or (now that its corruption is repaired) the setlist.fm setlist id. This canonicalizes those events: • re-key a fuzzy event to its strong key (g:<id> / sf:<id>), or • if a different event already owns that strong key, MERGE into it — collapsing e.g. \"Giants Game\" and \"New York Giants vs Cowboys\". Non-destructive: a merged loser is KEPT with merged_into set and its key"
+    },
+    {
+      "repo": "salty-mobile",
+      "file": "20260813320000_phishnet_show_id.sql",
+      "summary": "============================================================================ Phase 3 (step 2) — persist phish.net showid + use it as a strong key setlist-lookup already computes the phish.net showid (mapPhishNetSetlist) but dropped it. It's now stored on setlists.phishnet_show_id, and reconcile treats pn:<showid> as a trusted per-show strong key alongside g:<game> and sf:<setlist>. Applies to the Phish family only (small population), so mostly future-proofing. ============================================================================"
+    },
+    {
+      "repo": "salty-mobile",
+      "file": "20260814120000_content_alerts_and_pref_defaults.sql",
+      "summary": "Post-event content pushes (\"your setlist / final score / cast is ready\"). The enrichment pipeline already produces this content for every past event automatically, but nothing ever told the attendee. setlist_available and photos_added were wired into the Settings screen yet had NO send path; this migration adds the dedupe table for the send path and the two new channels (sports_result, cast_available) that the enrichment-worker now fires on. Schema + NEW-user defaults only. The existing-user backfill is a separate, deliberately-staged migration (20260814120100), matching the split used for 20260718020000 / 20260718030000."
+    },
+    {
+      "repo": "salty-mobile",
+      "file": "20260814120100_content_prefs_backfill.sql",
+      "summary": "STAGED -- affects what EXISTING users receive, so it is held for deliberate sign-off rather than run with the schema change (20260814120000). Mirrors the split used for 20260718020000 (schema) / 20260718030000 (backfill). Existing preference rows were written by 20260718030000 with setlist_available = false and photos_added = false, because at the time NEITHER had a send path -- the toggles were off simply because nothing could ever fire them, not because a user chose off. Now that setlist / sports_result / cast have a live send path, turn those three on for existing users so the flagship re-engagement pushes actually reach the current base. Deliberately does NOT touch photos_added (no send "
+    },
+    {
+      "repo": "salty-mobile",
+      "file": "20260814130000_streak_nudge.sql",
+      "summary": "Retention Phase 2: the monthly \"keep your streak alive\" nudge. Adds the streak_reminders channel, a once-per-user-per-month dedupe ledger, and the pg_cron job that drives the streak-nudge edge function. Mirrors the daily-digest cron wiring (20260709130000): pg_cron -> trigger_streak_nudge() -> pg_net POST with the shared scan_cron_secret."
+    },
+    {
+      "repo": "salty-mobile",
+      "file": "20260814140000_event_photo_alerts.sql",
+      "summary": "Retention Phase 3b: \"a friend added photos from an event you were both at\" push. Dedupe ledger for notify-event-photos. One alert per (adder, recipient, event) — so a friend who keeps adding to the same event's shared album isn't re-pinged; they can open the album to see more. No new preference: this rides the existing friend_activity channel. No client reads this table (service-role writes only), but RLS is enabled + read-own for parity with the other sent_* ledgers."
+    },
+    {
+      "repo": "salty-mobile",
+      "file": "20260814150000_crew_leaderboard.sql",
+      "summary": "Engagement: \"your crew\" leaderboard — rank the caller + their accepted friends by simple, privacy-safe counts. Mirrors get_mutual_event_counts / get_friend_profile_stats: SECURITY DEFINER, returns only AGGREGATE COUNTS (never a friend's ticket rows), scoped to the caller + accepted friends. A friend's aggregate stats are already visible to them via get_friend_profile_stats, so this exposes nothing new. Counts avoid date_str parsing (free text) — total shows = distinct canonical events; venues = distinct venue name; shared_with_me = events both attended (0 for self)."
+    },
+    {
+      "repo": "salty-mobile",
+      "file": "20260814160000_crew_leaderboard_this_year.sql",
+      "summary": "Crew leaderboard: add a \"this year\" dimension + a normalized year on tickets. date_str is free text (no date column), and we only need the YEAR for \"this year\" ranking, so extract the 4-digit year rather than parse a full date. IMMUTABLE so it can back a STORED generated column that auto-maintains on insert/update and backfills existing rows."
+    },
+    {
+      "repo": "salty-mobile",
+      "file": "20260814170000_shows_together_union.sql",
+      "summary": "Unify \"shows together\" across the Stats crew card and the Profile crew card. Previously they disagreed: the Stats card counted mutual tickets, the Profile card counted tags-by-me. One definition now: distinct events you were BOTH at by ANY signal — you both hold a ticket to the same canonical event, OR you tagged them on your ticket, OR they tagged you on theirs. SECURITY DEFINER + counts only (never a friend's rows), accepted-friends-gated."
+    },
+    {
+      "repo": "salty-mobile",
+      "file": "20260814180000_taste_profiles.sql",
+      "summary": "Server-sync the taste-picker answers (were AsyncStorage-only) so they survive reinstall / follow the user across devices, and can feed Discover ranking. One row per user, own-row RLS."
+    },
+    {
+      "repo": "salty-mobile",
+      "file": "20260814190000_saved_event_reminders.sql",
+      "summary": "\"Your saved event is coming up\" reminders. New channel + a once-per-event dedupe ledger + the daily cron. Date proximity is decided in the edge function (JS parse of free-text date_str), so no SQL date column is needed. Mirrors the streak-nudge cron wiring."
+    },
+    {
+      "repo": "salty-mobile",
+      "file": "20260814200000_event_people_discovery.sql",
+      "summary": "\"Who else was here\" people discovery — STRICTLY opt-in, off by default. A symmetric-consent pool: a user must set discoverable_at_events=true to APPEAR to others, AND must be discoverable to SEE others. So nothing about anyone's attendance is exposed until they explicitly opt in, and only to other opted-in co-attendees. Returns minimal public-profile fields only, never event history. PRIVACY: verified default=0, caller-only-opted-in=0 (a non-opted-in user is never revealed), both-opted-in+not-friends=1. Ship gated behind an explicit privacy review."
+    },
+    {
+      "repo": "salty-mobile",
+      "file": "20260814210000_saved_event_price_drops.sql",
+      "summary": "Price-drop alerts on saved events. Baseline price captured at save time (SavedEventsContext); the saved-event-reminders cron re-checks the current price (ticket-price-lookup) and notifies once on a meaningful drop. Best-effort — Ticketmaster omits prices on many events."
+    },
+    {
+      "repo": "salty-mobile",
+      "file": "20260814220000_setlist_predictions.sql",
+      "summary": "Stores the pre-show AI-predicted setlist per ticket (a plain string[] of song names), captured when the user views the \"likely setlist\" on an upcoming show. After the show it's compared to the real setlist for a \"you called N of M\" scorecard. Own-rows RLS; a prediction never touches the setlists table (setlist-lookup's preview mode is no-persist), so it can't corrupt the real setlist."
+    },
+    {
+      "repo": "salty-mobile",
+      "file": "20260815120000_privacy_settings_discover_trips.sql",
+      "summary": "Trip discovery is now an opt-in feature (Privacy → Photo scanning). This column gates whether the on-device photo scan looks for multi-day TRIPS in the user's camera roll and creates trip cards. OFF by default for EVERYONE, including users who already have trip tickets — there is intentionally no grandfathering. The flag governs FUTURE photo trip-discovery only: it never hides, removes, or reclassifies existing trip tickets (those stay ordinary rows in `tickets` and render as before). Night-event (concert/show) discovery and email/calendar ticket detection are unaffected."
+    },
+    {
+      "repo": "salty-mobile",
+      "file": "20260815130000_gate_trip_on_import.sql",
+      "summary": "Gate AUTO-detected trips on the opt-in flag (privacy_settings.discover_trips, OFF by default). Companion to the client-side photo-discovery gate (runPhotoDiscovery skips trip clustering when off). That covers photos, but email/hotel confirmations, forwarded mail, and calendar imports classify to 'trip' server-side via detectCategory and would still create trip cards for users who never opted in. Rather than edit + redeploy every scanner (scan-gmail, scan-imap, receive-forwarded-email, classify-calendar-events, …), gate once at the shared write path: a BEFORE INSERT trigger on `tickets` remaps an auto-sourced 'trip' to 'other' when the owner hasn't opted in, so it lands in the ring-fenced \"pe"
+    },
+    {
+      "repo": "salty-mobile",
+      "file": "20260815300000_geocode_skip_not_geocodable.sql",
+      "summary": "Stop the geocode queue refilling with venue strings that can NEVER resolve. Found via the failed pile on 2026-08-15: of 28 permanently-failed geocode jobs, four were not venues at all — a bare URL captured into venue_name (\"https://www.pbboatshow.com/...\"), a country (\"Mexico\"), and a private residence (\"A basement apartment in the East Village\"). Each burned max_attempts retries and then sat in 'failed' behind a misleading \"no related result\", which is indistinguishable from a real geocoder miss. The stored venue_name is NOT touched — the user sees that string on their ticket. This only decides whether a geocode JOB is ever enqueued for it. Source of truth for the full classification is cla"
+    },
+    {
+      "repo": "salty-mobile",
+      "file": "20260815310000_enrichment_lineup_roster.sql",
+      "summary": "Two more enrichment kinds: `lineup` (festival) and `roster` (sports teams). Both enrichers were already BUILT but were left on the pre-pillar opportunistic path — they only ran when a user happened to open the event (enrich-lineup from useEventDetails, sports-roster-lookup from useGameRoster). That is precisely the \"a derived field never got filled\" root cause that 20260813230000_enrichment_pipeline.sql exists to kill, so they belong on the queue. Measured on prod before writing this (2026-08-15): 14 of 14 active `festival` tickets had ZERO ticket_cast rows — enrich-lineup has effectively never landed. 48 of 50 sports_stats rows have an empty match `lineup` (that endpoint only covers soccer)"
+    },
+    {
+      "repo": "salty-mobile",
+      "file": "20260816120000_api_usage_log_retention.sql",
+      "summary": "Retention for api_usage_log — the external-API ledger written by _shared/apiUsage.ts trackedFetch. Nothing pruned this table. It was anthropic-only (12,228 rows / 3 MB over 47 days ≈ 260/day) until 2026-08-16, when every outbound provider call got instrumented — Ticketmaster, TheSportsDB, setlist.fm, Spotify, MusicBrainz, Nominatim, Photon, ESPN, MLB, NBA. That multiplies the write rate: sports-score-lookup's enrichLineupPhotos alone looks up each player individually at concurrency 6, so ONE soccer game can log ~30 rows. Unbounded growth of a pure telemetry table is the kind of thing nobody notices until a query gets slow. 90 days: the /api-usage page's widest window is 30d, so this keeps 3x"
+    },
+    {
+      "repo": "salty-mobile",
+      "file": "20260816130000_table_retention.sql",
+      "summary": "Retention for the remaining unbounded tables, completing the pass started with api_usage_log (20260816120000) and llm_call_log (admin 017). Sizes at authoring (2026-08-16): search_cache 595 rows / 960 kB, notifications 422 / 256 kB, scan_runs 1,566 / 584 kB, photo_match_proposals 6,591 / 4,368 kB. None is a problem TODAY — this is about the derivative, not the value. Every one of them grows monotonically with usage and nothing has ever deleted from them. The rule per table is NOT uniform, because two of them hold live user state and a blanket time-based delete would destroy it: search_cache pure cache; the read path already ignores rows older than its TTL, so"
+    },
+    {
+      "repo": "salty-mobile",
+      "file": "20260816140000_enrichment_lineup_include_edm.sql",
+      "summary": "Widen the `lineup` discovery predicate to include `edm`, now that the client can actually render it. 20260815310000 deliberately shipped festival-only: useEventDetails gated the cast/lineup card on `theater || festival`, so an EDM ticket would have cost an Anthropic call to write ticket_cast rows that nothing displayed. That gate now goes through isLineupCategory() (festival + edm) in lib/categories.ts, so the predicate can match it. Same root cause as isConcertLike: splitting `edm` out of `concert` left a trail of bare `=== 'festival'` / `=== 'concert'` gates that silently excluded it. Restates the whole function (create or replace swaps the body) from 20260815310000."
+    },
+    {
+      "repo": "Salty-Admin",
+      "file": "001_create_admin_tables.sql",
+      "summary": "Admin users table (standalone, not linked to public.users)"
+    },
+    {
+      "repo": "Salty-Admin",
+      "file": "002_add_feedback_status.sql",
+      "summary": "Add status column to feedback table so admins can track review state"
+    },
+    {
+      "repo": "Salty-Admin",
+      "file": "003_admin_rls.sql",
+      "summary": "Deny all non-service-role access. Service role bypasses RLS by default in Supabase."
+    },
+    {
+      "repo": "Salty-Admin",
+      "file": "004_add_user_ban.sql",
+      "summary": "Add banned_until to public.users for non-destructive account suspension"
+    },
+    {
+      "repo": "Salty-Admin",
+      "file": "005_admin_login_history.sql",
+      "summary": "Track every admin login for the profile page \"Recent logins\" feature"
+    },
+    {
+      "repo": "Salty-Admin",
+      "file": "006_create_support_chat.sql",
+      "summary": "Two-way, real-time support chat. Replaces the one-shot support_messages intake (mobile app's old \"Support\" mode) with a proper conversation/message thread model."
+    },
+    {
+      "repo": "Salty-Admin",
+      "file": "007_create_email_campaigns.sql",
+      "summary": "Email campaigns sent from the admin panel (product-update / announcement broadcasts). One row per bulk send. Per-user one-off emails are not logged here (they go to admin_audit_log)."
+    },
+    {
+      "repo": "Salty-Admin",
+      "file": "008_skip_admin_invite_profiles.sql",
+      "summary": "Skip app-user profiles for auth users minted by admin-panel invites."
+    },
+    {
+      "repo": "Salty-Admin",
+      "file": "009_admin_invite_tokens.sql",
+      "summary": "Magic-link admin invites. When a Super Admin invites a new admin, we store only the SHA-256 hash of a one-time token — the raw token lives briefly in the invite email URL. On accept, the invitee sets their bcrypt password and the token is cleared. Two columns keep this 1:1 with the admin_users row."
+    },
+    {
+      "repo": "Salty-Admin",
+      "file": "010_marketing_unsubscribe.sql",
+      "summary": "Marketing-email opt-out flag on public.users. Set true when a recipient clicks the unsubscribe link in a broadcast email — that link resolves to /unsubscribe/[userId]?t=... where t is an HMAC of the user id so links can't be guessed or transferred. Only the server-side unsubscribe action can flip this."
+    },
+    {
+      "repo": "Salty-Admin",
+      "file": "011_email_suppressions.sql",
+      "summary": "Hard-bounce / spam-complaint suppression list, keyed by email address. Populated by the Resend webhook (/api/webhooks/resend) whenever a message to an address permanently bounces or is marked as spam. resolveRecipients() drops any address listed here from every broadcast and custom send, so a young sending domain's reputation isn't eroded by re-mailing dead addresses or complainers."
+    },
+    {
+      "repo": "Salty-Admin",
+      "file": "012_suppression_manual_reason.sql",
+      "summary": "Allow admins to manually add an address to the suppression list (e.g. to block a known-bad address proactively, before it ever bounces). Extends the reason check from migration 011 with a third value, 'manual'."
+    },
+    {
+      "repo": "Salty-Admin",
+      "file": "013_admin_last_active_at.sql",
+      "summary": "\"Last active\" for admins: updated whenever they use the panel (throttled to one write per 2 minutes in getAdminUser), distinct from last_login_at which only moves on a fresh password login. Backfill from the last known login so existing admins show a sensible value until their next visit. (Already applied to prod via the Supabase migration tooling.)"
+    },
+    {
+      "repo": "Salty-Admin",
+      "file": "014_ops_monitoring.sql",
+      "summary": "Ops monitoring: turns the read-only /health page into a system that notices, notifies, and (where a runbook exists) fixes. Four concerns: alert_contacts who gets told, and in what order alert_settings thresholds — one row, id = 1 health_incidents one open row per failing check; alerts fire on state TRANSITIONS so a check that stays down doesn't re-mail every cron tick health_remediations audit trail of every auto-fix attempt (deterministic or AI) Plus llm_call_log: per-call token/cost accounting for every model call the admin makes. All admin-only; the app talks to them with the service-role key, which bypasses RLS."
+    },
+    {
+      "repo": "Salty-Admin",
+      "file": "015_count_pending_import_users.sql",
+      "summary": "Exact distinct-user count behind the unreviewed-import backlog. `pending_imports` counts EVENTS, not people — one user with a linked inbox routinely contributes dozens, so the raw total (1,211 at time of writing) reads as a user count and badly overstates reach. Every surface that shows the total now shows this next to it. It has to be counted in Postgres. Doing it client-side means selecting user_id for every pending row, and PostgREST caps a response at db-max-rows (1000 on this project) — so a JS Set over the result silently undercounts once the backlog passes that. It already has: the truncated approach reported 7 users where the real answer is 9."
+    },
+    {
+      "repo": "Salty-Admin",
+      "file": "016_api_usage_summary.sql",
+      "summary": "Aggregations behind the External API Usage page (/api-usage). `api_usage_log` is the edge functions' ledger of every outbound provider call (Ticketmaster, TheSportsDB, setlist.fm, Spotify, Nominatim, ESPN, MLB, Anthropic, …). It already holds 12k+ rows and only grows, so the page must NOT pull rows and reduce them in JS: PostgREST caps a response at db-max-rows (1000 on this project) regardless of .limit(), which silently turns \"calls last 30d\" into \"calls in the most recent 1000 rows\". Same trap documented in 015_count_pending_import_users. So every number the page shows is computed here, in Postgres, over the full window. All three are read-only, SECURITY DEFINER (the table is RLS-on with "
+    },
+    {
+      "repo": "Salty-Admin",
+      "file": "017_llm_call_log_retention.sql",
+      "summary": "Retention for llm_call_log — the admin panel's own per-call token/cost ledger (014_ops_monitoring). Sibling of the api_usage_log retention added the same day (salty-mobile 20260816120000_api_usage_log_retention.sql), but deliberately NOT the same numbers, because the two tables are read differently and are worth different amounts: api_usage_log /api-usage widest window 30d -> floor 30, keep 90 llm_call_log /llm-costs widest window 90d -> floor 90, keep 365 Two reasons this one keeps four times as long. First, /llm-costs offers a 90-day tab, so 90 days is the floor before anything the page can display starts disappearing — a 90-day retention would mean the 90d tab was always looking at the ra"
+    },
+    {
+      "repo": "Salty-Admin",
+      "file": "018_admin_page_permissions.sql",
+      "summary": "Per-admin page allowlist. Access was a single number (1 Super Admin … 4 Support), so granting someone Imports also granted every other level-2 page. This adds an optional narrowing on top of that bar. NULL = not configured, imposes NO restriction (existing admins keep exactly the access they have until someone deliberately narrows them). An EMPTY array is a real, deliberate \"no pages\". Level 1 bypasses it entirely — someone must always be able to repair a bad allowlist. Enforced in three places, all reading lib/pages.ts: proxy.ts blocks the request (server-action POSTs hit their own page route, so this gates those too, not just the GET)"
+    }
+  ],
+  "planningDocs": [
+    {
+      "file": "features-and-admin-tasks.md",
+      "title": "Salty — Features & Admin-Website Tasks",
+      "status": ""
+    },
+    {
+      "file": "forward-to-scan-plan.md",
+      "title": "Forward-to-Scan — Plan & Spec",
+      "status": "planning / not started · Drafted 2026-07-23"
+    },
+    {
+      "file": "google-oauth-verification-checklist.md",
+      "title": "Google OAuth restricted-scope verification — checklist (Pillar 5.1)",
+      "status": ""
+    },
+    {
+      "file": "microsoft-oauth-imap-plan.md",
+      "title": "Microsoft OAuth for Outlook / Hotmail / Live IMAP — Plan & Cost",
+      "status": "Phase-1 CODE BUILT (inert) 2026-08-08 — Pillar 5.2. Drafted 2026-07-23."
+    },
+    {
+      "file": "os-widgets.md",
+      "title": "OS Widgets",
+      "status": ""
+    },
+    {
+      "file": "perf-data-layer-plan.md",
+      "title": "Performance: persisted local-first data layer",
+      "status": "Proposed (post-launch performance pass)"
+    },
+    {
+      "file": "photo-scanner-seam-refactor-plan.md",
+      "title": "Photo-scanner seam refactor — plan (Pillar 4.3, deeper phase)",
+      "status": "Scoped 2026-08-08. Post-launch. This is the deep half of Pillar 4.3 (kill Class D —"
+    },
+    {
+      "file": "pillar4-ingestion-pipeline-plan.md",
+      "title": "Pillar 4 — One durable, observable ingestion pipeline",
+      "status": "BUILT — all 5 increments shipped 2026-08-08 (commits `ec2bdf5`, `cb5fd2a`,"
+    },
+    {
+      "file": "pillar5-email-oauth-plan.md",
+      "title": "Pillar 5 — Email OAuth-first (+ forward-to-scan fallback)",
+      "status": "Scoped 2026-08-08. Increment 5.0 (Gmail fail-fast scope validation) built alongside"
+    },
+    {
+      "file": "season-tickets-plan.md",
+      "title": "Season tickets — scope",
+      "status": ""
+    },
+    {
+      "file": "tag-accept-plan.md",
+      "title": "Tag acceptance → owned ticket + photo pull — scope",
+      "status": ""
+    }
+  ],
+  "legalDocs": [
+    {
+      "file": "docs/legal/kids-compliance-checklist.md",
+      "title": "Kids feature — COPPA / GDPR-K compliance & DPIA checklist (DRAFT)",
+      "headings": [
+        "1. Scope of processing",
+        "2. Controls already implemented (verify during review)",
+        "3. Open decisions requiring counsel (BLOCKERS for public launch)",
+        "4. GDPR-K / UK Age Appropriate Design Code (if EU/UK users)",
+        "5. Recommended posture",
+        "Not legal advice"
+      ]
+    },
+    {
+      "file": "docs/legal/kids-privacy-policy-section.md",
+      "title": "Children & Family — privacy policy section (DRAFT for legal review)",
+      "headings": [
+        "What the feature does (plain description for counsel)",
+        "Draft policy text",
+        "Open items for counsel to resolve"
+      ]
+    },
+    {
+      "file": "docs/legal/site/help-and-support.md",
+      "title": "Deleting Your Salty Account — Salty Digital LLC",
+      "headings": [
+        "Getting started",
+        "Importing your tickets",
+        "How email scanning works (and your privacy)",
+        "Events, setlists & memories",
+        "Friends & social",
+        "Family & Time Capsule",
+        "Discover & saved events",
+        "Notifications",
+        "Privacy & security",
+        "Your account",
+        "Troubleshooting",
+        "Still need help?"
+      ]
+    },
+    {
+      "file": "docs/legal/site/privacy-policy.md",
+      "title": "PRIVACY POLICY",
+      "headings": [
+        "1. Eligibility",
+        "2. Information We Collect",
+        "3. How We Use Your Information",
+        "4. Gmail Integration & Google API Policy",
+        "5. How We Share Your Information",
+        "6. Children & Family Features",
+        "7. Data Retention",
+        "8. Data Security",
+        "9. Cookies & Tracking",
+        "10. Your Rights & Choices",
+        "11. Third-Party Links & Services",
+        "12. Changes to This Policy",
+        "13. Google Play Data Safety",
+        "14. Contact Us"
+      ]
+    },
+    {
+      "file": "docs/legal/site/publish-now/help-and-support.md",
+      "title": "Deleting Your Salty Account — Salty Digital LLC",
+      "headings": [
+        "Getting started",
+        "Importing your tickets",
+        "How email scanning works (and your privacy)",
+        "Events, setlists & memories",
+        "Friends & social",
+        "Discover & saved events",
+        "Notifications",
+        "Privacy & security",
+        "Your account",
+        "Troubleshooting",
+        "Still need help?"
+      ]
+    },
+    {
+      "file": "docs/legal/site/publish-now/privacy-policy.md",
+      "title": "PRIVACY POLICY",
+      "headings": [
+        "1. Eligibility",
+        "2. Information We Collect",
+        "3. How We Use Your Information",
+        "4. Gmail Integration & Google API Policy",
+        "5. How We Share Your Information",
+        "6. Data Retention",
+        "7. Data Security",
+        "8. Cookies & Tracking",
+        "9. Your Rights & Choices",
+        "10. Third-Party Links & Services",
+        "11. Changes to This Policy",
+        "12. Google Play Data Safety",
+        "13. Contact Us"
+      ]
+    },
+    {
+      "file": "docs/legal/site/publish-now/terms-and-conditions.md",
+      "title": "TERMS & CONDITIONS",
+      "headings": [
+        "1. Acceptance of Terms",
+        "2. Description of Service",
+        "3. User Accounts",
+        "4. User Content",
+        "5. Gmail & Google Integration",
+        "6. Prohibited Conduct",
+        "7. Intellectual Property",
+        "8. Third-Party Services",
+        "9. Disclaimers",
+        "10. Limitation of Liability",
+        "11. Indemnification",
+        "12. Modifications to the Service",
+        "13. Changes to These Terms",
+        "14. Governing Law & Dispute Resolution"
+      ]
+    },
+    {
+      "file": "docs/legal/site/terms-and-conditions.md",
+      "title": "TERMS & CONDITIONS",
+      "headings": [
+        "1. Acceptance of Terms",
+        "2. Description of Service",
+        "3. User Accounts",
+        "4. User Content",
+        "5. Gmail & Google Integration",
+        "5a. Family & Hand-Over Features",
+        "6. Prohibited Conduct",
+        "6a. Direct Messages",
+        "7. Intellectual Property",
+        "8. Third-Party Services",
+        "9. Disclaimers",
+        "10. Limitation of Liability",
+        "11. Indemnification",
+        "12. Modifications to the Service"
+      ]
+    }
+  ],
+  "appModules": [
+    "ask",
+    "auth",
+    "calendar",
+    "challenges",
+    "discover",
+    "events",
+    "family",
+    "home",
+    "imports",
+    "map",
+    "memories",
+    "moderation",
+    "performer",
+    "profile",
+    "search",
+    "settings",
+    "social",
+    "sports",
+    "stats",
+    "status",
+    "tickets"
+  ],
+  "adminLibs": [
+    {
+      "name": "airtable.ts",
+      "purpose": "Read-only Airtable client for the \"Beta Users Feedback\" base (base id appUUEmdTAOl9ZmXV) — in-app feedback, synced from Supabase via the feedback-to-airtable edge function. This is the single source for the admin Beta Feedback dashboard (the TestFlight base is deliberately not read here). AIRTABLE_API_KEY — personal access token (starts with `pat`), scoped to data.records:read on the base below. AIRTABLE_BETA_FEEDBACK_BASE_ID — base id (defaults to appUUEmdTAOl9ZmXV). Read-only. Leave AIRTABLE_API_KEY unset to disable the page (it shows a setup notice instead of erroring — same pattern as the v2 database / PostHog)."
+    },
+    {
+      "name": "alerts.ts",
+      "purpose": "Incident lifecycle and cascading notification for the health checks. The rule that makes this usable rather than noisy: **alerts fire on state transitions, not on state.** A check that has been down for six hours produced one tier-1 email when it broke, one tier-2 email when it stayed broken past the escalation window, and one \"recovered\" email at the end — not one per cron tick. Tier 1 is the first responder (Rahul). Tier 2 is pulled in only when tier 1 hasn't cleared the incident within `escalate_after_minutes` — the \"what if he's travelling\" case from the 8/15 review."
+    },
+    {
+      "name": "anthropic.ts",
+      "purpose": "Salty's edge functions call Anthropic over raw fetch with a forced tool call (see enrich-cast); the admin app has no SDK installed, so we mirror that proven pattern — no new dependency, and it's known to work on this account's key."
+    },
+    {
+      "name": "api-usage.ts",
+      "purpose": "The external-API ledger (`api_usage_log`), written by the edge functions' trackedFetch wrapper. Sibling to lib/llm/log.ts, but for the OTHER side of the bill: Ticketmaster, TheSportsDB, setlist.fm, Spotify, Nominatim, ESPN, MLB — the providers the product depends on that nothing was watching. The provider's own dashboard can tell you a quota is nearly spent; only this can tell you which edge function spent it. Every figure is aggregated in Postgres (016_api_usage_summary.sql). Reducing rows in JS would be silently wrong: PostgREST caps responses at 1000 rows on this project regardless of .limit(), and this table is already past 12k. Same trap as count_pending_import_users."
+    },
+    {
+      "name": "auth.ts",
+      "purpose": "Per-admin page allowlist. null = unrestricted (level rules only). See lib/pages.ts."
+    },
+    {
+      "name": "categories.ts",
+      "purpose": "Canonical ticket taxonomy for the admin panel — kept in sync with the app's source of truth at salty-mobile/lib/categories.ts. When the mobile app adds or renames a category or source, update THIS one file and every admin dropdown, filter, validator, chart, and emoji stays correct. History: the admin previously hardcoded a stale list (`dining`, and missing `edm`/`comedy`/`talk`) in ~8 places, which silently downgraded approved imports to `other` and blocked editing those tickets."
+    },
+    {
+      "name": "config-status.ts",
+      "purpose": "Read-only client for the mobile project's `config-status` edge function — reports which server-side secrets are set (names + presence booleans only; secret VALUES are never returned). Auth is a shared secret sent as the `x-config-secret` header, so the powerful Supabase Management personal access token stays OUT of the admin app. CONFIG_STATUS_SECRET — shared secret; must match the same-named Edge Function secret set in the mobile Supabase project. Leave CONFIG_STATUS_SECRET unset to disable the mobile-secrets section (a setup notice shows instead — same pattern as the other optional integrations)."
+    },
+    {
+      "name": "email.ts",
+      "purpose": "Resend transport for admin-sent emails (product-update / announcement broadcasts and one-off per-user messages). Requires two env vars: RESEND_API_KEY — API key from resend.com EMAIL_FROM — verified sender, e.g. \"Salty <updates@saltydigital.ai>\""
+    },
+    {
+      "name": "errors.ts",
+      "purpose": "Mobile crash / unhandled-exception feed, from PostHog's `$exception` events. Closes the last blind spot in the health picture. lib/health.ts pings edge functions for reachability and reads ingestion telemetry, but nothing surfaced errors happening ON DEVICE — a crash loop in the app was invisible to the admin panel entirely. PostHog is already collecting these (44 in the 30 days before this shipped), so this needs no new integration or credential, just a read. Grouped by PostHog's own `$exception_issue_id`, so the grouping matches what you'd see in PostHog's Error Tracking UI rather than a second, divergent definition."
+    },
+    {
+      "name": "events.ts",
+      "purpose": "Helpers for the canonical-event surface (the `public.events` table the app resolves every ticket to). Mirrors the app's identity model: an event's `event_key` is a strong id when it carries a `g:`/`sf:`/`pn:` prefix, otherwise a fuzzy `title|date`. Precedence: g: (sports) > sf: (setlist.fm) > pn: (phish.net) > fuzzy."
+    },
+    {
+      "name": "format.ts",
+      "purpose": "Format a ticket price. Returns '—' when no price is recorded."
+    },
+    {
+      "name": "health.ts",
+      "purpose": "The health checks, extracted from the /health page so the cron job (/api/cron/health) runs exactly what the page renders. Two implementations would drift, and a monitor that disagrees with the dashboard is worse than none. Everything here is read-only — no check mutates state or triggers real work."
+    },
+    {
+      "name": "invite.ts",
+      "purpose": "One-time invite / password-set token for the admin panel. Only the SHA-256 hash is persisted (admin_users.invite_token_hash). The raw token is embedded in the invite URL emailed to the invitee, so a DB leak never yields a valid, usable token — a matching URL is still required. 32 random bytes → 43-char base64url string; brute-forcing the hash space is not feasible."
+    },
+    {
+      "name": "message-templates.ts",
+      "purpose": "Pre-written email + push-notification templates for the admin Email and Notifications pages. Picking one pre-fills the composer so common messages don't have to be typed from scratch — edit the fields before sending. Text in [square brackets] is a placeholder: swap it for the real detail before you send. Nothing here is substituted automatically. To add a template, append to the relevant array — the pickers pick it up automatically. Email bodies use blank lines to separate paragraphs (the branded renderer turns each blank-line-delimited block into a paragraph)."
+    },
+    {
+      "name": "ops-cycle.ts",
+      "purpose": "One full monitoring cycle: check → reconcile → remediate → verify → notify. Shared by the cron route and the \"Run now\" button on /health so both do exactly the same thing. The ordering matters: remediation runs *before* notification, and a verification pass re-reconciles afterwards. A transient blip that auto-heals within the cycle therefore resolves silently — nobody is emailed about a problem that no longer exists by the time the email would have been sent."
+    },
+    {
+      "name": "pages.ts",
+      "purpose": "The canonical list of admin pages. Extracted out of components/sidebar.tsx so ONE table drives three things that must never disagree: what the sidebar renders, what the per-admin page allowlist offers, and what the proxy enforces. When they were separate, a page could be hidden from the nav while still being reachable by typing the URL. `maxLevel` is the CAPABILITY bar (1 = Super Admin … 4 = Support) and is unchanged. The allowlist layers ON TOP of it — it can only ever narrow access, never widen it. See canAccessPage()."
+    },
+    {
+      "name": "pending-imports.ts",
+      "purpose": "How many distinct users are behind the unreviewed-import backlog. `pending_imports` counts EVENTS, not people: one user with a linked inbox routinely contributes dozens, so the raw total reads as a user count and badly overstates reach. Every surface that shows the total shows this next to it. Counted in Postgres, not JS. PostgREST caps a response at `db-max-rows` (1000 on this project), so `select user_id` + a Set silently undercounts the moment the backlog passes that — and the backlog is already four figures."
+    },
+    {
+      "name": "posthog.ts",
+      "purpose": "Read-only PostHog query client for admin analytics (build adoption, etc.). PostHog's ingestion (\"project\") API keys are write-only, so querying needs a **Personal API key** scoped to `query:read` (+ `project:read`): POSTHOG_API_KEY — personal API key (starts with `phx_`) POSTHOG_PROJECT_ID — numeric project id (defaults to 489677, the Salty project) POSTHOG_HOST — API host (defaults to https://us.posthog.com) The panel only ever runs read-only HogQL SELECTs against this connection. Leave POSTHOG_API_KEY unset to disable the feature — pages show a \"not connected\" notice (same pattern as the v2 database / Beta Signups page) instead of erroring."
+    },
+    {
+      "name": "remediation.ts",
+      "purpose": "Auto-remediation for health incidents. The safety property that makes this acceptable against production: **the model never writes an action, it only chooses one from the allow-list below.** Every entry is a bounded, reversible operation that a human would run from the admin panel anyway. An LLM that returns anything not in this list is ignored and the incident escalates to a person instead. Deterministic rules run first and cover the cases we already understand. The model tier (lib/llm/ladder.ts) is only consulted for incidents with no matching rule, and only when `ai_triage_enabled` is on — so the common path costs nothing and behaves identically every time."
+    },
+    {
+      "name": "sort.ts",
+      "purpose": "Server-side, in-memory row sorting for fully-loaded (non-paginated) tables that pair with the URL-driven <SortLink> header. Reads `sort`/`dir` from the page's searchParams; when no known sort key is set, falls back to `fallback` (typically newest-first). Nulls always sort last; strings compare numerically-aware."
+    },
+    {
+      "name": "unsubscribe.ts",
+      "purpose": "Absolute human-facing unsubscribe URL (confirmation page). Deterministic given the secret — no DB row per token needed."
+    },
+    {
+      "name": "userActivity.ts",
+      "purpose": "Ids of users who performed an action (≥1 ticket, or a Gmail/IMAP connection)."
+    },
+    {
+      "name": "validate.ts",
+      "purpose": "Server-side input validation helpers. All server actions should validate inputs before touching the database."
+    }
+  ],
+  "adminRoutes": [
+    "/",
+    "/accept-invite",
+    "/ai-usage",
+    "/analytics",
+    "/api-usage",
+    "/beta-signups",
+    "/build-adoption",
+    "/data-quality",
+    "/discovery",
+    "/email",
+    "/email/suppressions",
+    "/enrichment",
+    "/events",
+    "/events/[id]",
+    "/events/canonical/[id]",
+    "/feedback",
+    "/gmail-connections",
+    "/health",
+    "/knowledge-base",
+    "/llm-costs",
+    "/login",
+    "/manual-edit",
+    "/moderation",
+    "/notifications",
+    "/pending-imports",
+    "/photo-scans",
+    "/photos",
+    "/profile",
+    "/release-gate",
+    "/settings/admin-users",
+    "/settings/alerts",
+    "/settings/audit-log",
+    "/settings/config",
+    "/settings/feature-flags",
+    "/social",
+    "/support-chat",
+    "/support-chat/[id]",
+    "/tickets",
+    "/unsubscribe/[userId]",
+    "/unsubscribe/beta",
+    "/users",
+    "/users/[id]",
+    "/users/active",
+    "/users/engagement",
+    "/v2-analytics"
+  ]
+}

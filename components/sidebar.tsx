@@ -8,11 +8,12 @@ import {
   ChevronRight, LogOut, Wifi, Activity, ShieldAlert, MessageSquare,
   MailPlus, MailX, Sparkles, ScanLine, Music, Heart, Compass, Image as ImageIcon, Rocket, LineChart,
   Smartphone, Gauge, Inbox, UserCheck, KeyRound, ToggleLeft, SquarePen, HeartPulse, BadgeCheck,
-  CalendarClock, Coins, BellRing,
+  CalendarClock, Coins, BellRing, Plug, BookOpen,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { useAdmin } from './admin-provider'
 import { ACCESS_LEVEL_LABELS } from '@/types/admin'
+import { ADMIN_PAGES, canAccessPage } from '@/lib/pages'
 
 interface NavSection {
   label: string
@@ -90,6 +91,8 @@ const NAV_SECTIONS: NavSection[] = [
       { href: '/health',                label: 'Health',       icon: HeartPulse, maxLevel: 1 },
       { href: '/settings/alerts',       label: 'Alerts',       icon: BellRing,   maxLevel: 1 },
       { href: '/llm-costs',             label: 'LLM Costs',    icon: Coins,      maxLevel: 2 },
+      { href: '/api-usage',             label: 'API Usage',    icon: Plug,       maxLevel: 2 },
+      { href: '/knowledge-base',        label: 'Knowledge Base', icon: BookOpen, maxLevel: 2 },
       { href: '/release-gate',          label: 'Release Gate', icon: Smartphone, maxLevel: 1 },
       { href: '/settings/config',       label: 'Config Status', icon: KeyRound, maxLevel: 1 },
       { href: '/settings/feature-flags', label: 'Feature Flags', icon: ToggleLeft, maxLevel: 1 },
@@ -140,7 +143,11 @@ export function Sidebar({ counts }: SidebarProps) {
       {/* Nav */}
       <nav className="flex-1 overflow-y-auto py-3">
         {NAV_SECTIONS.map((section) => {
-          const visible = section.items.filter((i) => admin.access_level <= i.maxLevel)
+          {/* Same canAccessPage() the proxy and requirePage() use — the nav must never advertise a
+              link that would bounce, nor hide one the user can actually reach. */}
+          const visible = section.items.filter((i) =>
+            canAccessPage(admin, ADMIN_PAGES.find((p) => p.href === i.href) ?? null),
+          )
           if (visible.length === 0) return null
           return (
             <div key={section.label} className="mb-1">

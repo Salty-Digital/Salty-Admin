@@ -32,7 +32,9 @@ interface Runbook {
   run: (incident: Incident) => Promise<{ ok: boolean; detail: string }>
 }
 
-const EDGE_FUNCTION_HINT = /^(sports-score-lookup|enrich-cast|setlist-lookup|geocode-venues|config-status)$/
+// Keep in sync with EDGE_FUNCTIONS in lib/health.ts — this gates whether the verify_only runbook
+// applies to a check name, so a function present there but missing here has no runbook.
+const EDGE_FUNCTION_HINT = /^(sports-score-lookup|enrich-cast|enrich-lineup|setlist-lookup|geocode-venues|config-status)$/
 
 export const RUNBOOKS: Runbook[] = [
   {

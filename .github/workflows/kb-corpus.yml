@@ -1,0 +1,102 @@
+# Keeps the knowledge-base corpus in sync with both repos.
+#
+# The corpus is a committed snapshot (see scripts/build-kb-corpus.mjs) because the deployed admin
+# has neither repo on disk. A committed snapshot drifts, and a stale corpus fails *silently* — the
+# assistant keeps answering confidently about a system that has moved on. This regenerates it and
+# opens a PR when it actually changed.
+#
+# REQUIRED SECRET: MOBILE_REPO_TOKEN — a PAT with read access to the salty-mobile repository,
+# because the corpus needs both codebases. Without it the job SKIPS rather than committing a
+# half-corpus built from the admin repo alone, which would silently delete every edge function
+# and migration from the assistant's knowledge.
+name: KB corpus
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'app/**'
+      - 'lib/**'
+      - 'supabase/migrations/**'
+      - 'scripts/build-kb-corpus.mjs'
+  schedule:
+    # Weekly, so changes in salty-mobile (which cannot trigger this workflow) still land.
+    - cron: '0 6 * * 1'
+  workflow_dispatch:
+
+jobs:
+  reindex:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: write
+    steps:
+      - name: Check out Salty-Admin
+        uses: actions/checkout@v4
+        with:
+          path: admin
+
+      - name: Check for the mobile-repo token
+        id: gate
+        run: |
+          if [ -n "${{ secrets.MOBILE_REPO_TOKEN }}" ]; then
+            echo "ok=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "ok=false" >> "$GITHUB_OUTPUT"
+            echo "::warning::MOBILE_REPO_TOKEN is not set — skipping. The corpus needs both repos."
+          fi
+
+      - name: Check out salty-mobile
+        if: steps.gate.outputs.ok == 'true'
+        uses: actions/checkout@v4
+        with:
+          repository: Salty267/Salty-Mobile-App
+          token: ${{ secrets.MOBILE_REPO_TOKEN }}
+          path: salty-mobile
+
+      - name: Set up Node
+        if: steps.gate.outputs.ok == 'true'
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Rebuild the corpus
+        if: steps.gate.outputs.ok == 'true'
+        working-directory: admin
+        env:
+          SALTY_MOBILE_PATH: ${{ github.workspace }}/salty-mobile
+        run: node scripts/build-kb-corpus.mjs
+
+      # Sanity gate: the generator emits an empty inventory if a path is wrong, and committing that
+      # would wipe the assistant's knowledge without failing anything. Refuse to proceed on an
+      # implausibly small corpus.
+      - name: Sanity-check the corpus
+        if: steps.gate.outputs.ok == 'true'
+        working-directory: admin
+        run: |
+          node -e "
+            const c = require('./lib/kb/corpus.generated.json');
+            const fns = c.edgeFunctions.length, migs = c.migrations.length;
+            console.log('edge functions:', fns, '| migrations:', migs);
+            if (fns < 20 || migs < 50) {
+              console.error('Corpus looks truncated — refusing to commit.');
+              process.exit(1);
+            }
+          "
+
+      - name: Open a PR if the corpus changed
+        if: steps.gate.outputs.ok == 'true'
+        uses: peter-evans/create-pull-request@v6
+        with:
+          path: admin
+          add-paths: lib/kb/corpus.generated.json
+          branch: chore/kb-corpus-refresh
+          title: 'chore: refresh knowledge-base corpus'
+          commit-message: 'chore: refresh knowledge-base corpus'
+          body: |
+            Regenerated `lib/kb/corpus.generated.json` from both repos.
+
+            This is what the Knowledge Base assistant reasons over. Review the diff for
+            unexpected removals — a shrinking corpus usually means a path or checkout broke,
+            not that code was deleted.
+          delete-branch: true

@@ -17,6 +17,7 @@ interface Job {
 
 const KIND_LABEL: Record<string, string> = {
   geocode: 'Geocode', sports_result: 'Sports result', cast: 'Cast', setlist: 'Setlist', verify: 'Verify',
+  lineup: 'Lineup', roster: 'Roster',
 }
 const STATUS_COLOR: Record<string, string> = { pending: '#C8A96E', done: '#3E8A5A', failed: '#BF4A3A' }
 
@@ -124,9 +125,10 @@ async function renderPipeline(db: ReturnType<typeof createServiceClient>, canAct
   const runs = ((runsRaw ?? []) as { id: number; status_code: number | null; content: string; created: string }[]).map((r) => {
     let s: Record<string, { claimed?: number; found?: number; copied?: number; improved?: number; retried?: number; rekeyed?: number; merged?: number }> | null = null
     try { s = JSON.parse(r.content) } catch { s = null }
-    const kinds = ['sports_result', 'geocode', 'cast', 'setlist', 'verify']
-    const claimed = s ? kinds.reduce((n, k) => n + (s![k]?.claimed ?? 0), 0) : 0
-    const copied = s ? kinds.reduce((n, k) => n + (s![k]?.copied ?? 0) + (s![k]?.improved ?? 0), 0) : 0
+    // Read the kind list from the shared constant — this used to be a second hardcoded copy, so a
+    // new kind silently went uncounted in the run totals until someone noticed the mismatch.
+    const claimed = s ? ENRICHMENT_KINDS.reduce((n, k) => n + (s![k]?.claimed ?? 0), 0) : 0
+    const copied = s ? ENRICHMENT_KINDS.reduce((n, k) => n + (s![k]?.copied ?? 0) + (s![k]?.improved ?? 0), 0) : 0
     return { id: r.id, status_code: r.status_code, created: r.created, claimed, copied, reconcile: s?.reconcile ?? null }
   })
   const lastReconcile = runs.find((r) => r.reconcile)?.reconcile ?? null

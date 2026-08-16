@@ -6,6 +6,14 @@ import { TicketActivityChart } from '@/components/charts/ticket-activity-chart'
 import { NewUsersChart } from '@/components/charts/new-users-chart'
 import { TicketSourceChart } from '@/components/charts/ticket-source-chart'
 import { formatPrice } from '@/lib/format'
+import {
+  loadActivation, loadEngagement, loadSourceEffectiveness,
+  loadEnrichmentCoverage, loadTimeToFirstTicket, loadFilterOptions, parseFilters,
+} from '@/lib/analytics'
+import {
+  ActivationFunnel, EngagementPanel, SourcePanel, EnrichmentPanel, TimeToFirstTicketPanel,
+} from './behavioural'
+import { AnalyticsFilters } from './filters'
 
 function Panel({ title, action, children }: { title: string; action?: { label: string; href: string }; children: React.ReactNode }) {
   return (
@@ -62,8 +70,21 @@ async function getActiveUserCounts(db: ReturnType<typeof createServiceClient>) {
   }
 }
 
-export default async function AnalyticsPage() {
+interface AnalyticsPageProps {
+  searchParams: Promise<{ days?: string; category?: string; source?: string }>
+}
+
+export default async function AnalyticsPage({ searchParams }: AnalyticsPageProps) {
   await requireAdmin()
+
+  // Options first: parseFilters validates the incoming params against values that actually exist,
+  // so a hand-crafted ?category= can never reach SQL as a novel string.
+  const filterOptions = await loadFilterOptions()
+  const filters = parseFilters(
+    await searchParams,
+    filterOptions.categories.map((c) => c.value),
+    filterOptions.sources.map((s) => s.value),
+  )
   const db = createServiceClient()
 
   const SIX_MONTHS_AGO = new Date()
@@ -95,6 +116,11 @@ export default async function AnalyticsPage() {
     { data: auditWeek },
     { data: aiQuestions },
     activeUsers,
+    activation,
+    engagement,
+    sourceEffectiveness,
+    enrichmentCoverage,
+    timeToFirst,
   ] = await Promise.all([
     db.from('users').select('*', { count: 'exact', head: true }),
     db.from('tickets').select('*', { count: 'exact', head: true }),
@@ -117,6 +143,14 @@ export default async function AnalyticsPage() {
     // the /ai-usage page reads from — this panel is the top-line summary.
     db.from('saved_ai_questions').select('id, user_id, created_at'),
     getActiveUserCounts(db),
+    // Behavioural aggregates, all computed in Postgres (migration 020). loadEngagement never
+    // throws — a PostHog outage degrades that one panel rather than the whole page.
+    loadActivation(filters),
+    // Engagement is event-based and has no category/source dimension, so only the window applies.
+    loadEngagement(filters.days ?? 90),
+    loadSourceEffectiveness(filters),
+    loadEnrichmentCoverage(filters),
+    loadTimeToFirstTicket(filters),
   ])
 
   // ── Ticket activity by month ─────────────────────────────────────────
@@ -220,6 +254,21 @@ export default async function AnalyticsPage() {
         <h1 className="font-sora text-[20px] font-bold text-salty-text">Analytics</h1>
         <p className="text-[13px] text-salty-muted">Platform metrics and usage trends</p>
       </div>
+
+      <AnalyticsFilters categories={filterOptions.categories} sources={filterOptions.sources} />
+
+      {/* Behavioural analytics. Placed above the count panels on purpose: "how many tickets exist"
+          is a description, "are users activating and coming back" is a decision.
+          These four honour the filters; the count panels below are still all-time. */}
+      <div className="grid gap-5 lg:grid-cols-2">
+        <ActivationFunnel a={activation} />
+        <EngagementPanel e={engagement} />
+      </div>
+      <div className="grid gap-5 lg:grid-cols-2">
+        <SourcePanel rows={sourceEffectiveness} />
+        <TimeToFirstTicketPanel rows={timeToFirst} />
+      </div>
+      <EnrichmentPanel rows={enrichmentCoverage} />
 
       {/* Summary cards */}
       <div className="grid grid-cols-2 gap-4 lg:grid-cols-5">

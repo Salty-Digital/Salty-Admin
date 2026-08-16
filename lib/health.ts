@@ -1,6 +1,7 @@
 import { createServiceClient } from '@/lib/supabase/server'
 import { isConfigStatusConfigured, fetchMobileSecretStatus } from '@/lib/config-status'
 import { countPendingImportUsers } from '@/lib/pending-imports'
+import kbCorpus from '@/lib/kb/corpus.generated.json'
 
 /**
  * The health checks, extracted from the /health page so the cron job
@@ -32,6 +33,7 @@ type Db = ReturnType<typeof createServiceClient>
 export const EDGE_FUNCTIONS = [
   'sports-score-lookup',
   'enrich-cast',
+  'enrich-lineup',
   'setlist-lookup',
   'geocode-venues',
   'config-status',
@@ -147,6 +149,94 @@ export const OUTCOME_LABEL: Record<string, string> = {
   error: 'Error', empty: 'Empty', partial: 'Partial',
 }
 
+/**
+ * Per-source scan health, straight from the `scan_cron_health` view.
+ *
+ * The view exists precisely because the scan cron was once silently down for ~3 weeks and the
+ * aggregate funnel below could not show it — a source that stops running contributes nothing, and
+ * "nothing" looks identical to "quiet". It separates the two states that matter:
+ *
+ *   cron_silent        no run of ANY outcome in 1h  → the scheduler isn't reaching this source
+ *   no_recent_success  no `ok` run in 2h            → running, but not completing successfully
+ *
+ * Only `cron_silent` drives the check. `no_recent_success` is expected whenever nobody has a linked
+ * inbox — the dispatcher still records a `no_connection` run per sweep, so the source is healthy
+ * while never producing an `ok`. Treating that as an incident would keep the alert permanently on.
+ */
+export interface ScanSource {
+  source: string
+  total_runs: number
+  ok_runs: number
+  last_ok_at: string | null
+  last_run_at: string | null
+  cron_silent: boolean
+  no_recent_success: boolean
+}
+
+async function loadScanSources(db: Db): Promise<ScanSource[]> {
+  // One row per source — far below any row cap, so a plain select is safe here.
+  const { data } = await db
+    .from('scan_cron_health')
+    .select('source, total_runs, ok_runs, last_ok_at, last_run_at, cron_silent, no_recent_success')
+  return ((data ?? []) as ScanSource[]).sort((a, b) => a.source.localeCompare(b.source))
+}
+
+/** "12m ago" / "8h ago" / "8d ago" / "never". Exported so the check detail and the page render the
+ *  same string — this file's whole premise is that the monitor and the dashboard cannot drift. */
+export const sinceText = (iso: string | null): string => {
+  if (!iso) return 'never'
+  const hrs = (Date.now() - Date.parse(iso)) / 3_600_000
+  if (hrs < 1) return `${Math.max(1, Math.round(hrs * 60))}m ago`
+  if (hrs < 48) return `${Math.round(hrs)}h ago`
+  return `${Math.round(hrs / 24)}d ago`
+}
+
+/**
+ * A scan source whose scheduler has gone quiet. This is the check the 3-week outage needed.
+ *
+ * `warn`, not `down`: this is one ingestion source rather than a hard service failure, and the
+ * remediation is a human looking at a connection, not a restart. The detail names the source and
+ * how long it has been silent so the judgement can be made without opening SQL.
+ */
+function scanCronCheck(sources: ScanSource[]): Check {
+  if (sources.length === 0) {
+    return { name: 'Scan cron', status: 'warn', detail: 'no scan_runs rows at all — the dispatcher has never recorded a run' }
+  }
+  const silent = sources.filter((s) => s.cron_silent)
+  const detail = sources
+    .map((s) => `${s.source}: last run ${sinceText(s.last_run_at)}, last ok ${sinceText(s.last_ok_at)}`)
+    .join(' · ')
+  if (silent.length > 0) {
+    const names = silent.map((s) => `${s.source} (silent ${sinceText(s.last_run_at)})`).join(', ')
+    return { name: 'Scan cron', status: 'warn', detail: `${names} — scheduler not reaching this source. ${detail}` }
+  }
+  return { name: 'Scan cron', status: 'ok', detail }
+}
+
+/**
+ * Knowledge-base corpus freshness.
+ *
+ * The assistant answers from a snapshot committed by `npm run kb:index`. A stale snapshot fails
+ * silently and confidently — it describes a system that has moved on — which is the exact failure
+ * mode everything else on this page exists to catch, so it gets a check of its own.
+ *
+ * Advisory: an out-of-date doc corpus is a to-do, not an outage, and must never open an incident.
+ */
+function corpusCheck(): Check {
+  const generatedAt = (kbCorpus as { generatedAt?: string }).generatedAt
+  if (!generatedAt) {
+    return { name: 'KB corpus', status: 'warn', detail: 'no corpus committed — run npm run kb:index', advisory: true }
+  }
+  const days = Math.floor((Date.now() - Date.parse(generatedAt)) / 86_400_000)
+  const detail = `indexed ${days === 0 ? 'today' : `${days}d ago`} · ${(kbCorpus as { edgeFunctions: unknown[] }).edgeFunctions.length} edge functions`
+  // 30 days: long enough not to nag through a quiet month, short enough that a refactor-heavy
+  // stretch surfaces before the assistant starts answering from a system that no longer exists.
+  if (days >= 30) {
+    return { name: 'KB corpus', status: 'warn', detail: `${detail} — stale, run npm run kb:index`, advisory: true }
+  }
+  return { name: 'KB corpus', status: 'ok', detail, advisory: true }
+}
+
 export interface Ingestion {
   runCount: number
   outcomes: [string, number][]
@@ -234,6 +324,7 @@ export interface HealthReport {
   mobile: Check[]
   snapshot: Snapshot
   ingestion: Ingestion
+  scanSources: ScanSource[]
   ranAt: string
 }
 
@@ -243,13 +334,14 @@ export async function runHealthChecks(): Promise<HealthReport> {
   const url = process.env.NEXT_PUBLIC_SUPABASE_URL
   const anon = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY
 
-  const [dbCheck, authCheck, mobile, edgeChecks, snapshot, ingestion] = await Promise.all([
+  const [dbCheck, authCheck, mobile, edgeChecks, snapshot, ingestion, scanSources] = await Promise.all([
     checkDatabase(db),
     checkAuth(db),
     loadMobile(),
     Promise.all(EDGE_FUNCTIONS.map((n) => pingEdge(n, url, anon))),
     loadSnapshot(db),
     loadIngestion(db),
+    loadScanSources(db),
   ])
 
   const bridgeCheck: Check = !mobile.configured
@@ -266,6 +358,8 @@ export async function runHealthChecks(): Promise<HealthReport> {
     return { name: m.name, status: set ? 'ok' : 'warn', detail: set ? m.desc : `not set — ${m.desc} unavailable`, advisory: true }
   })
 
+  const corpus = corpusCheck()
+
   const envChecks: Check[] = CRITICAL_ENV.map((e) => ({
     name: e.name,
     status: process.env[e.name] ? 'ok' : 'warn',
@@ -273,25 +367,26 @@ export async function runHealthChecks(): Promise<HealthReport> {
     advisory: true,
   }))
 
-  const core = [dbCheck, authCheck, pipelineCheck(snapshot), enrichmentCheck(ingestion)]
+  const core = [dbCheck, authCheck, scanCronCheck(scanSources), pipelineCheck(snapshot), enrichmentCheck(ingestion)]
 
   // Overall = worst of the runtime service checks; advisory warnings (env presence, and
   // mobile keys only when the bridge is up) can raise it to "degraded" but never "down".
   const runtime = [...core, ...edgeChecks, bridgeCheck]
-  const advisory = [...envChecks, ...(bridgeUp ? mobileChecks : [])]
+  const advisory = [...envChecks, corpus, ...(bridgeUp ? mobileChecks : [])]
   const overall: Status = runtime.some((c) => c.status === 'down') ? 'down'
     : runtime.some((c) => c.status === 'warn') || advisory.some((c) => c.status === 'warn') ? 'warn'
     : 'ok'
 
   return {
     overall,
-    checks: [...core, ...edgeChecks, bridgeCheck, ...envChecks, ...mobileChecks],
+    checks: [...core, ...edgeChecks, bridgeCheck, ...envChecks, corpus, ...mobileChecks],
     core,
     edge: edgeChecks,
-    env: envChecks,
+    env: [...envChecks, corpus],
     mobile: [bridgeCheck, ...mobileChecks],
     snapshot,
     ingestion,
+    scanSources,
     ranAt: new Date().toISOString(),
   }
 }

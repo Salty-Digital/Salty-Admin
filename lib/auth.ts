@@ -1,11 +1,14 @@
 import { redirect } from 'next/navigation'
 import { createAuthClient, createServiceClient } from './supabase/server'
+import { canAccessPage, pageForPath } from './pages'
 
 export interface AdminUser {
   id: string
   email: string
   full_name: string | null
   access_level: number
+  /** Per-admin page allowlist. null = unrestricted (level rules only). See lib/pages.ts. */
+  allowed_pages: string[] | null
 }
 
 export async function getAdminUser(): Promise<AdminUser | null> {
@@ -18,7 +21,7 @@ export async function getAdminUser(): Promise<AdminUser | null> {
   const service = createServiceClient()
   const { data } = await service
     .from('admin_users')
-    .select('id, email, full_name, access_level, is_active, last_active_at')
+    .select('id, email, full_name, access_level, allowed_pages, is_active, last_active_at')
     .eq('email', user.email)
     .eq('is_active', true)
     .single()
@@ -33,7 +36,13 @@ export async function getAdminUser(): Promise<AdminUser | null> {
     await service.from('admin_users').update({ last_active_at: new Date().toISOString() }).eq('id', data.id)
   }
 
-  return { id: data.id, email: data.email, full_name: data.full_name, access_level: data.access_level }
+  return {
+    id: data.id,
+    email: data.email,
+    full_name: data.full_name,
+    access_level: data.access_level,
+    allowed_pages: (data.allowed_pages as string[] | null) ?? null,
+  }
 }
 
 /**
@@ -45,6 +54,22 @@ export async function requireAdmin(maxLevel = 4): Promise<AdminUser> {
   const admin = await getAdminUser()
   if (!admin) redirect('/login?error=unauthorized')
   if (admin.access_level > maxLevel) redirect('/?error=forbidden')
+  return admin
+}
+
+/**
+ * Page-level gate: the caller must clear BOTH the level bar and their page allowlist.
+ *
+ * Use this instead of requireAdmin() at the top of a page. requireAdmin() stays the right call
+ * inside a server action, where the question is "may you perform this operation", not "may you see
+ * this screen".
+ *
+ * `href` must be a page in ADMIN_PAGES; pass the page's own route.
+ */
+export async function requirePage(href: string): Promise<AdminUser> {
+  const admin = await getAdminUser()
+  if (!admin) redirect('/login?error=unauthorized')
+  if (!canAccessPage(admin, pageForPath(href))) redirect('/?error=forbidden')
   return admin
 }
 

@@ -8,6 +8,7 @@ import { assertUUID, assertEmail, assertString, assertAccessLevel } from '@/lib/
 import { sendHtmlEmail } from '@/lib/email'
 import { renderAdminInviteEmail } from '@/lib/emails/admin-invite'
 import { generateInviteToken, inviteExpiryFromNow, acceptInviteUrl } from '@/lib/invite'
+import { ADMIN_PAGES } from '@/lib/pages'
 
 export async function inviteAdminAction(email: string, fullName: string, accessLevel: number) {
   const admin = await requireAdmin(1)
@@ -128,6 +129,51 @@ export async function changeAccessLevelAction(targetAdminId: string, newLevel: n
   await logAudit(admin.id, 'change_access_level', 'admin_user', tid, {
     from: target.access_level,
     to: lvl,
+  })
+  revalidatePath('/settings/admin-users')
+}
+
+/**
+ * Set (or clear) a target admin's page allowlist.
+ *
+ * `pages = null` clears the restriction — that admin reverts to plain level rules. An empty array
+ * is a deliberate "no pages" and is allowed.
+ *
+ * Two guards worth keeping:
+ *  - Only hrefs in ADMIN_PAGES are stored, so a typo or a stale page can't linger as a permission.
+ *  - You cannot restrict yourself, and level-1 admins cannot be restricted at all — the allowlist is
+ *    bypassed for them by canAccessPage(), so storing one would be a lie in the UI.
+ */
+export async function setAllowedPagesAction(targetAdminId: string, pages: string[] | null) {
+  const admin = await requireAdmin(1)
+  const tid = assertUUID(targetAdminId, 'Admin ID')
+
+  if (tid === admin.id) throw new Error('You cannot change your own page access.')
+
+  const db = createServiceClient()
+  const { data: target } = await db
+    .from('admin_users')
+    .select('id, email, access_level, allowed_pages')
+    .eq('id', tid)
+    .single()
+  if (!target) throw new Error('Admin not found.')
+  if (target.access_level <= 1) {
+    throw new Error('Super Admins always have access to every page — restrict their level instead.')
+  }
+
+  // Drop anything not in the registry, and anything their level could not reach anyway.
+  const clean = pages === null
+    ? null
+    : [...new Set(pages)].filter((href) =>
+        ADMIN_PAGES.some((p) => p.href === href && target.access_level <= p.maxLevel),
+      )
+
+  await db.from('admin_users').update({ allowed_pages: clean }).eq('id', tid)
+  await logAudit(admin.id, 'set_admin_page_access', 'admin_user', tid, {
+    email: target.email,
+    from: target.allowed_pages ?? null,
+    to: clean,
+    count: clean?.length ?? null,
   })
   revalidatePath('/settings/admin-users')
 }

@@ -1,7 +1,7 @@
 import Link from 'next/link'
 import { Coins, AlertTriangle, Building2, Layers } from 'lucide-react'
 import { requireAdmin } from '@/lib/auth'
-import { loadLlmCalls, type LlmCallRow } from '@/lib/llm/log'
+import { loadLlmCalls, loadLlmCostSummary, loadLlmCostDaily } from '@/lib/llm/log'
 import { formatUsd, modelLabel } from '@/lib/llm/pricing'
 import { fetchOrgUsage, isOrgUsageConfigured, type OrgUsage } from '@/lib/llm/anthropic-usage'
 
@@ -14,9 +14,6 @@ interface PageProps {
   searchParams: Promise<{ days?: string }>
 }
 
-function tokensOf(r: LlmCallRow) {
-  return r.input_tokens + r.output_tokens + r.cache_read_tokens + r.cache_creation_tokens
-}
 
 function StatCard({ label, value, sub, accent }: { label: string; value: string; sub?: string; accent: string }) {
   return (
@@ -94,7 +91,14 @@ export default async function LlmCostsPage({ searchParams }: PageProps) {
     ? (Number(params.days) as Window)
     : 30
 
-  const calls = await loadLlmCalls(days)
+  // rollup/daily are aggregated in Postgres over the whole window; `calls` is a bounded row
+  // listing used only for the recent-failures table (well under the 1000-row PostgREST cap).
+  const [rollup, rollup24h, dailyRows, calls] = await Promise.all([
+    loadLlmCostSummary(days),
+    loadLlmCostSummary(1),
+    loadLlmCostDaily(days),
+    loadLlmCalls(days, 200),
+  ])
 
   // The org-wide panel is optional: it needs a separate Admin API key. A failure here
   // must not take the page down — the ledger below is the part we own.
@@ -113,20 +117,25 @@ export default async function LlmCostsPage({ searchParams }: PageProps) {
     }
   }
 
-  const totalCost = calls.reduce((sum, r) => sum + r.cost_usd, 0)
-  const totalTokens = calls.reduce((sum, r) => sum + tokensOf(r), 0)
+  // Every total below is folded from `rollup`, which Postgres already aggregated over the FULL
+  // window. It used to be reduced from `calls`, which PostgREST truncates at 1000 rows regardless
+  // of .limit() — so the reported spend silently became "the most recent 1000 calls". `calls` is
+  // now only used for the bounded recent-failures list, where the cap cannot bite.
+  const totalCost = rollup.reduce((sum, r) => sum + r.cost_usd, 0)
+  const totalTokens = rollup.reduce((sum, r) => sum + r.tokens, 0)
+  const totalCalls = rollup.reduce((sum, r) => sum + r.calls, 0)
+  const failureCount = rollup.reduce((sum, r) => sum + r.failures, 0)
   const failures = calls.filter((r) => !r.ok)
-  const dayMs = 86_400_000
-  const last24h = calls.filter((r) => Date.now() - Date.parse(r.created_at) <= dayMs)
-  const cost24h = last24h.reduce((sum, r) => sum + r.cost_usd, 0)
+  const cost24h = rollup24h.reduce((sum, r) => sum + r.cost_usd, 0)
+  const calls24h = rollup24h.reduce((sum, r) => sum + r.calls, 0)
 
   // ── By feature — the attribution the provider's billing page can't give us ──
   const byOperation = new Map<string, { cost: number; calls: number; tokens: number }>()
-  for (const r of calls) {
+  for (const r of rollup) {
     const e = byOperation.get(r.operation) ?? { cost: 0, calls: 0, tokens: 0 }
     e.cost += r.cost_usd
-    e.calls += 1
-    e.tokens += tokensOf(r)
+    e.calls += r.calls
+    e.tokens += r.tokens
     byOperation.set(r.operation, e)
   }
   const operations = [...byOperation.entries()].sort((a, b) => b[1].cost - a[1].cost)
@@ -134,25 +143,17 @@ export default async function LlmCostsPage({ searchParams }: PageProps) {
 
   // ── By model ──
   const byModel = new Map<string, { cost: number; calls: number; provider: string }>()
-  for (const r of calls) {
+  for (const r of rollup) {
     const e = byModel.get(r.model) ?? { cost: 0, calls: 0, provider: r.provider }
     e.cost += r.cost_usd
-    e.calls += 1
+    e.calls += r.calls
     byModel.set(r.model, e)
   }
   const models = [...byModel.entries()].sort((a, b) => b[1].cost - a[1].cost)
   const maxModelCost = models[0]?.[1].cost ?? 0
 
-  // ── Daily trend from our own ledger ──
-  const byDay = new Map<string, number>()
-  for (let i = days - 1; i >= 0; i--) {
-    byDay.set(new Date(Date.now() - i * dayMs).toISOString().slice(0, 10), 0)
-  }
-  for (const r of calls) {
-    const key = r.created_at.slice(0, 10)
-    if (byDay.has(key)) byDay.set(key, (byDay.get(key) ?? 0) + r.cost_usd)
-  }
-  const dailySeries = [...byDay.entries()].map(([date, costUsd]) => ({ date, costUsd }))
+  // ── Daily trend from our own ledger (Postgres-aggregated; zero-spend days come back as zeros) ──
+  const dailySeries = dailyRows.map((d) => ({ date: d.day, costUsd: d.cost_usd }))
 
   return (
     <div className="p-7 space-y-5">
@@ -182,18 +183,18 @@ export default async function LlmCostsPage({ searchParams }: PageProps) {
       </div>
 
       <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
-        <StatCard label={`Spend · ${days}d`} value={formatUsd(totalCost)} sub={`${calls.length.toLocaleString()} calls`} accent="#E8581A" />
-        <StatCard label="Spend · 24h" value={formatUsd(cost24h)} sub={`${last24h.length.toLocaleString()} calls`} accent="#C8A96E" />
+        <StatCard label={`Spend · ${days}d`} value={formatUsd(totalCost)} sub={`${totalCalls.toLocaleString()} calls`} accent="#E8581A" />
+        <StatCard label="Spend · 24h" value={formatUsd(cost24h)} sub={`${calls24h.toLocaleString()} calls`} accent="#C8A96E" />
         <StatCard label="Tokens" value={totalTokens.toLocaleString()} sub="input + output + cache" accent="#5A8FBF" />
         <StatCard
           label="Failed calls"
-          value={failures.length.toLocaleString()}
-          sub={calls.length ? `${Math.round((failures.length / calls.length) * 100)}% of calls` : '—'}
-          accent={failures.length > 0 ? '#BF4A3A' : '#5A9E6F'}
+          value={failureCount.toLocaleString()}
+          sub={totalCalls ? `${Math.round((failureCount / totalCalls) * 100)}% of calls` : '—'}
+          accent={failureCount > 0 ? '#BF4A3A' : '#5A9E6F'}
         />
       </div>
 
-      {calls.length === 0 && (
+      {totalCalls === 0 && (
         <div className="rounded-[14px] border border-salty-border bg-warm-white px-5 py-8 text-center">
           <p className="text-[13px] text-salty-muted">
             No model calls recorded in this window. The ledger fills as AI features are used —

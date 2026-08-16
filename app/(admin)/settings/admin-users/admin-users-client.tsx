@@ -13,6 +13,7 @@ import {
   DialogHeader, DialogTitle, DialogTrigger,
 } from '@/components/ui/dialog'
 import { Button } from '@/components/ui/button'
+import { PageAccessDialog } from './page-access-dialog'
 
 // Compact "time ago" for the Last Login column. Duration-based, so it's timezone-agnostic
 // (a bare toLocaleDateString flips a day across the UTC/local boundary and can't convey
@@ -36,6 +37,8 @@ interface AdminRow {
   email: string
   full_name: string | null
   access_level: number
+  /** null = unrestricted (level rules only); an array is an explicit allowlist. */
+  allowed_pages: string[] | null
   is_active: boolean
   last_login_at: string | null
   last_active_at: string | null
@@ -140,6 +143,7 @@ export function AdminUsersClient({ rows, currentAdminId }: { rows: AdminRow[]; c
             <tr className="border-b border-salty-border bg-cream text-left text-[11px] font-semibold uppercase tracking-[0.06em] text-salty-muted">
               <SortHeader label="Admin" sortKey="admin" sortState={sortState} onSort={requestSort} className="px-4 py-3" />
               <SortHeader label="Access Level" sortKey="level" sortState={sortState} onSort={requestSort} className="px-4 py-3" />
+              <th className="px-4 py-3">Page Access</th>
               <SortHeader label="Status" sortKey="status" sortState={sortState} onSort={requestSort} className="px-4 py-3" />
               <SortHeader label="Last Active" sortKey="lastActive" sortState={sortState} onSort={requestSort} className="px-4 py-3" />
               <SortHeader label="Invited By" sortKey="invitedBy" sortState={sortState} onSort={requestSort} className="px-4 py-3" />
@@ -198,6 +202,20 @@ function AdminUserRow({ row, isSelf }: { row: AdminRow; isSelf: boolean }) {
           >
             {[1,2,3,4].map(l => <option key={l} value={l}>{l} — {ACCESS_LEVEL_LABELS[l]}</option>)}
           </select>
+        )}
+      </td>
+      <td className="px-4 py-3">
+        {/* Super Admins bypass the allowlist by design (canAccessPage), and you cannot restrict
+            yourself — showing an editor in either case would imply a control that does nothing. */}
+        {isSelf || row.access_level <= 1 ? (
+          <span className="text-[12px] text-salty-muted">All pages</span>
+        ) : (
+          <PageAccessDialog
+            adminId={row.id}
+            email={row.email}
+            accessLevel={row.access_level}
+            allowedPages={row.allowed_pages}
+          />
         )}
       </td>
       <td className="px-4 py-3">

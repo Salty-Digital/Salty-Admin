@@ -1,12 +1,13 @@
 import Link from 'next/link'
 import {
   HeartPulse, Database, Server, KeyRound, Boxes, Smartphone,
-  CheckCircle2, AlertTriangle, XCircle, RefreshCw, ScanLine,
+  CheckCircle2, AlertTriangle, XCircle, RefreshCw, ScanLine, Bug,
 } from 'lucide-react'
 import { requireAdmin } from '@/lib/auth'
-import { runHealthChecks, OUTCOME_LABEL, type Check, type Status } from '@/lib/health'
+import { runHealthChecks, OUTCOME_LABEL, sinceText, type Check, type Status } from '@/lib/health'
 import { getOpenIncidents, getRecentIncidents, getAlertSettings, getAlertContacts } from '@/lib/alerts'
 import { getRecentRemediations } from '@/lib/remediation'
+import { loadErrorSummary } from '@/lib/errors'
 import { HealthRefresher } from './health-refresher'
 import { IncidentsPanel } from './incidents-panel'
 
@@ -16,16 +17,19 @@ export const dynamic = 'force-dynamic'
 export default async function HealthPage() {
   await requireAdmin(1)
 
-  const [report, openIncidents, recentIncidents, remediations, settings, contacts] = await Promise.all([
+  const [report, openIncidents, recentIncidents, remediations, settings, contacts, errors] = await Promise.all([
     runHealthChecks(),
     getOpenIncidents(),
     getRecentIncidents(25),
     getRecentRemediations(12),
     getAlertSettings(),
     getAlertContacts(),
+    // Read-only PostHog query; loadErrorSummary never throws, so a bad key degrades this one
+    // panel rather than taking down the page that reports whether everything else is up.
+    loadErrorSummary(7),
   ])
 
-  const { overall, core, edge, env, mobile, snapshot: snap, ingestion } = report
+  const { overall, core, edge, env, mobile, snapshot: snap, ingestion, scanSources } = report
 
   const overallCopy = {
     ok:   { title: 'All systems operational', sub: 'Every runtime check passed.' },
@@ -121,6 +125,41 @@ export default async function HealthPage() {
           <span className="text-[11.5px] text-salty-muted">· last 7 days · {ingestion.runCount.toLocaleString()} runs</span>
           <Link href="/enrichment?tab=pipeline" className="ml-auto text-[12px] font-medium text-ember hover:underline">Enrichment pipeline →</Link>
         </div>
+        {/* Per-source cron health. The funnel below aggregates every source together, so a source
+            that STOPS running contributes nothing and is invisible there — which is exactly how the
+            scan cron stayed down for ~3 weeks. This row is the thing that makes silence visible. */}
+        <div className="border-b border-salty-border bg-cream/40 px-5 py-3.5">
+          <p className="mb-2 text-[11px] font-semibold uppercase tracking-[0.06em] text-salty-muted">Per-source cron</p>
+          {scanSources.length === 0 ? (
+            <p className="text-[12.5px] text-salty-muted">No scan runs recorded for any source.</p>
+          ) : (
+            <div className="space-y-1.5">
+              {scanSources.map((s) => (
+                <div key={s.source} className="flex flex-wrap items-baseline gap-x-3 gap-y-0.5 text-[12.5px]">
+                  <span className="w-14 shrink-0 font-mono font-medium text-salty-text">{s.source}</span>
+                  <span
+                    className={`shrink-0 rounded-full px-2 py-0.5 text-[11px] font-semibold ${
+                      s.cron_silent ? 'bg-[#F7E4E1] text-[#BF4A3A]' : 'bg-[#E3F1E8] text-[#3E8A5A]'
+                    }`}
+                  >
+                    {s.cron_silent ? 'silent' : 'running'}
+                  </span>
+                  <span className="text-salty-secondary">
+                    last run {sinceText(s.last_run_at)} · last ok {sinceText(s.last_ok_at)}
+                  </span>
+                  <span className="ml-auto tabular-nums text-salty-muted">
+                    {s.ok_runs.toLocaleString()} ok / {s.total_runs.toLocaleString()} runs
+                  </span>
+                </div>
+              ))}
+              <p className="pt-1.5 text-[11px] text-salty-muted">
+                <strong>Silent</strong> means the scheduler hasn’t reached that source in over an hour — the
+                state that matters. A source with no <em>ok</em> runs is normal when nobody has a linked
+                inbox: the sweep still records a “no connection” run each time.
+              </p>
+            </div>
+          )}
+        </div>
         {/* Funnel: listed → accepted */}
         <div className="grid grid-cols-2 gap-px bg-salty-border sm:grid-cols-3 lg:grid-cols-6">
           {[
@@ -170,6 +209,59 @@ export default async function HealthPage() {
             <p className="mt-3 text-[11.5px] text-salty-muted">Retry failed jobs on the <Link href="/enrichment?tab=pipeline" className="font-medium text-ember hover:underline">pipeline</Link>.</p>
           </div>
         </div>
+      </div>
+
+      {/* Mobile errors — the last blind spot. Everything above measures the SERVER: edge functions
+          answering, ingestion flowing, jobs draining. None of it sees a crash on the device. */}
+      <div className="overflow-hidden rounded-[14px] border border-salty-border bg-warm-white">
+        <div className="flex items-center gap-2 border-b border-salty-border px-5 py-3">
+          <Bug className="h-4 w-4 text-ember" />
+          <h2 className="font-sora text-[14px] font-bold text-salty-text">Mobile errors</h2>
+          <span className="text-[11.5px] text-salty-muted">
+            · last 7 days · {errors.total.toLocaleString()} events
+          </span>
+        </div>
+        {!errors.configured ? (
+          <p className="px-5 py-8 text-center text-[13px] text-salty-muted">
+            POSTHOG_API_KEY not set — unhandled app exceptions can’t be read.
+          </p>
+        ) : errors.error ? (
+          <p className="px-5 py-8 text-center text-[13px] text-[#BF4A3A]">
+            PostHog query failed: {errors.error}
+          </p>
+        ) : errors.issues.length === 0 ? (
+          <p className="px-5 py-8 text-center text-[13px] text-salty-muted">
+            No unhandled exceptions reported in the last 7 days.
+          </p>
+        ) : (
+          <div className="overflow-x-auto">
+            <table className="w-full">
+              <thead>
+                <tr className="border-b border-salty-border bg-cream">
+                  <th className="px-4 py-3 text-left text-[11px] font-semibold uppercase tracking-[0.06em] text-salty-muted">Error</th>
+                  <th className="px-4 py-3 text-left text-[11px] font-semibold uppercase tracking-[0.06em] text-salty-muted">Build</th>
+                  <th className="px-4 py-3 text-right text-[11px] font-semibold uppercase tracking-[0.06em] text-salty-muted">Events</th>
+                  <th className="px-4 py-3 text-right text-[11px] font-semibold uppercase tracking-[0.06em] text-salty-muted">Users</th>
+                  <th className="px-4 py-3 text-right text-[11px] font-semibold uppercase tracking-[0.06em] text-salty-muted">Last seen</th>
+                </tr>
+              </thead>
+              <tbody>
+                {errors.issues.map((i) => (
+                  <tr key={i.issueId} className="border-b border-salty-border last:border-0">
+                    <td className="px-4 py-2.5">
+                      <p className="text-[12.5px] font-medium text-salty-text">{i.type}</p>
+                      <p className="font-mono text-[11.5px] text-salty-secondary">{i.message || '—'}</p>
+                    </td>
+                    <td className="px-4 py-2.5 text-[12px] text-salty-muted">{i.appVersions.join(', ') || '—'}</td>
+                    <td className="px-4 py-2.5 text-right text-[12.5px] font-semibold tabular-nums text-salty-text">{i.events.toLocaleString()}</td>
+                    <td className="px-4 py-2.5 text-right text-[12.5px] tabular-nums text-salty-secondary">{i.users.toLocaleString()}</td>
+                    <td className="whitespace-nowrap px-4 py-2.5 text-right text-[12px] text-salty-muted">{sinceText(i.lastSeen)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
       </div>
     </div>
   )
