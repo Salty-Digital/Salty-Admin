@@ -14,9 +14,13 @@ key, not a provider outage** — which is why retrying had never helped.
 
 | Workstream | Before | After | Of |
 |---|---|---|---|
-| Tickets with map coordinates | 0 | **19** | 29 |
+| Previously-failed tickets now with coordinates | 0 | **19** | 29 |
 | Sports tickets with a resolved game | 55 | **70** | 93 |
 | Matching versions, repo ↔ prod ledger | 28 of 218 | **1** | 1 |
+
+Across the whole library, **248 of 281** active tickets with a venue now have map
+coordinates (**88%**) — the remaining 33 are 7 still-resolvable and 26 correctly classified
+as not geocodable. Measured 2026-08-16.
 
 Tests: **2364 passing** (147 added). Wrong rows found and removed: **11**.
 Foreign leagues on US-venue tickets: **0**. Prod schema changes: **0**.

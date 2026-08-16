@@ -7,7 +7,8 @@
       "id": "geocode",
       "title": "Venue geocoding",
       "status": "shipped",
-      "metric": { "label": "tickets with map coordinates", "before": 0, "after": 19, "of": 29 },
+      "metric": { "label": "previously-failed tickets now with map coordinates", "before": 0, "after": 19, "of": 29 },
+      "coverage": { "label": "all active tickets with a venue that have coordinates", "have": 248, "of": 281, "percent": 88, "stillPending": 7, "notGeocodable": 26, "measured": "2026-08-16" },
       "detail": "28 tickets (not 20 as first reported) were dead-lettered with 'no related result'. The provider was never at fault: Nominatim has no API key and returned HTTP 200 every time. It returns an empty result when a venue NAME is mashed with a STREET ADDRESS in one query, and the fallback ladder only ran when the address sat on its own newline — so 26 of 28 venues issued a single unanswerable query.",
       "outcome": "19 resolved, 3 correctly classified not-geocodable (a URL, a bare country, a private residence), 7 honest misses. No wrong pins."
     },
