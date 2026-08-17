@@ -5,10 +5,11 @@
 # assistant keeps answering confidently about a system that has moved on. This regenerates it and
 # opens a PR when it actually changed.
 #
-# REQUIRED SECRET: MOBILE_REPO_TOKEN — a PAT with read access to the salty-mobile repository,
-# because the corpus needs both codebases. Without it the job SKIPS rather than committing a
-# half-corpus built from the admin repo alone, which would silently delete every edge function
-# and migration from the assistant's knowledge.
+# REQUIRED SECRET: MOBILE_REPO_TOKEN — a PAT with read access to Salty-Digital/Salty_Mobile,
+# because the corpus needs both codebases. Both repos are private and GITHUB_TOKEN is scoped to
+# this one only, so the cross-repo checkout cannot use it. Without the PAT the job SKIPS rather
+# than committing a half-corpus built from the admin repo alone, which would silently delete
+# every edge function and migration from the assistant's knowledge.
 name: KB corpus
 
 on:
@@ -50,7 +51,7 @@ jobs:
         if: steps.gate.outputs.ok == 'true'
         uses: actions/checkout@v4
         with:
-          repository: Salty267/Salty-Mobile-App
+          repository: Salty-Digital/Salty_Mobile
           token: ${{ secrets.MOBILE_REPO_TOKEN }}
           path: salty-mobile
 
