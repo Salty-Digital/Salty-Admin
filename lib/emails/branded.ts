@@ -31,8 +31,8 @@ export function renderBrandedEmail(input: {
     )
     .join('')
   const footerContact = input.unsubscribeUrl
-    ? `<a href="${input.unsubscribeUrl}" style="color:#FAC775; text-decoration:underline;">Unsubscribe</a> &middot; <a href="mailto:support@saltydigital.ai" style="color:#FAC775; text-decoration:underline;">support@saltydigital.ai</a>`
-    : `<a href="mailto:support@saltydigital.ai" style="color:#FAC775; text-decoration:underline;">support@saltydigital.ai</a>`
+    ? `<a href="${input.unsubscribeUrl}" style="color:#FAC775; text-decoration:underline;">Unsubscribe</a> &middot; <a href="mailto:support@support.saltydigital.ai" style="color:#FAC775; text-decoration:underline;">support@support.saltydigital.ai</a>`
+    : `<a href="mailto:support@support.saltydigital.ai" style="color:#FAC775; text-decoration:underline;">support@support.saltydigital.ai</a>`
 
   const html = `<!doctype html>
 <html>
@@ -98,8 +98,8 @@ export function renderBrandedEmail(input: {
   // Plain-text alternative. A multipart/alternative message (text + html) avoids the
   // MIME_HTML_ONLY spam penalty and is what legitimate bulk senders always include.
   const footerText = input.unsubscribeUrl
-    ? `Unsubscribe: ${input.unsubscribeUrl}\nQuestions? support@saltydigital.ai`
-    : `Questions? support@saltydigital.ai`
+    ? `Unsubscribe: ${input.unsubscribeUrl}\nQuestions? support@support.saltydigital.ai`
+    : `Questions? support@support.saltydigital.ai`
   const text = `${input.subject}
 
 ${input.body.trim()}

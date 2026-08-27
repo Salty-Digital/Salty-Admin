@@ -334,7 +334,7 @@ export function renderBetaInviteEmail(input: {
         <div style="font-family:'Helvetica Neue',Helvetica,Arial,sans-serif; font-size:18px; font-weight:700; color:#ffffff; letter-spacing:6px; padding-bottom:12px; padding-left:6px;">SALTY</div>
         <div style="font-family:'Helvetica Neue',Helvetica,Arial,sans-serif; font-size:14px; line-height:21px; color:#B9B2D6; padding-bottom:14px;">A fan-memory app for tracking your concerts, games, and Broadway shows.<br>Concerts &middot; Sports &middot; Travel &mdash; remembered.</div>
         <div style="font-family:'Helvetica Neue',Helvetica,Arial,sans-serif; font-size:13px; line-height:21px; color:#B9B2D6;">
-          Questions? Reply to this email, or reach us at <a href="mailto:support@saltydigital.ai" style="color:#FAC775; text-decoration:underline;">support@saltydigital.ai</a>.<br>
+          Questions? Reply to this email, or reach us at <a href="mailto:support@support.saltydigital.ai" style="color:#FAC775; text-decoration:underline;">support@support.saltydigital.ai</a>.<br>
           ${referralLine}
           <span style="color:#8E86AD;">${unsubPrefix}Salty Digital, Delaware, USA &nbsp;&middot;&nbsp; &copy; 2026 Salty Digital. All rights reserved.</span>
         </div>
@@ -388,7 +388,7 @@ Your feedback decides what we build next. As a thank-you, you get lifetime premi
 Thank you for believing in this before it was even real. We can't wait for you to see it.
 — The Salty Team
 
-Questions? Reply to this email, or reach us at support@saltydigital.ai
+Questions? Reply to this email, or reach us at support@support.saltydigital.ai
 ${input.unsubscribeUrl ? `Unsubscribe: ${input.unsubscribeUrl}\n` : ''}Salty Digital, Delaware, USA · © 2026 Salty Digital. All rights reserved.`
 
   return { subject: subjectText, html, text }

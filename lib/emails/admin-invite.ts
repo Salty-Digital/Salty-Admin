@@ -158,7 +158,7 @@ export function renderAdminInviteEmail(input: {
             <td style="font-family:'Helvetica Neue',Helvetica,Arial,sans-serif; font-size:14px; line-height:21px; color:#B9B2D6; padding-bottom:14px;">Salty Admin &middot; Internal team access only.</td>
           </tr>
           <tr>
-            <td style="font-family:'Helvetica Neue',Helvetica,Arial,sans-serif; font-size:13px; line-height:21px; color:#B9B2D6;">Questions? Reply to this email, or reach us at <a href="mailto:support@saltydigital.ai" style="color:#FAC775; text-decoration:underline;">support@saltydigital.ai</a>.<br><span style="color:#8E86AD;">Salty Digital, Delaware, USA &middot; &copy; 2026 Salty Digital. All rights reserved.</span></td>
+            <td style="font-family:'Helvetica Neue',Helvetica,Arial,sans-serif; font-size:13px; line-height:21px; color:#B9B2D6;">Questions? Reply to this email, or reach us at <a href="mailto:support@support.saltydigital.ai" style="color:#FAC775; text-decoration:underline;">support@support.saltydigital.ai</a>.<br><span style="color:#8E86AD;">Salty Digital, Delaware, USA &middot; &copy; 2026 Salty Digital. All rights reserved.</span></td>
           </tr>
         </table>
       </td>

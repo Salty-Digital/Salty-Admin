@@ -156,7 +156,7 @@ export function renderBetaReminderEmail(input: {
           <td bgcolor="#1A0848" style="background-color:#1A0848; padding:30px 32px; border-radius:0 0 20px 20px;">
             <div style="font-family:${sans}; font-size:22px; font-weight:700; color:#ffffff; letter-spacing:7px; padding-bottom:10px;">SALTY</div>
             <div style="font-family:${sans}; font-size:14px; line-height:21px; color:#B9B2D6; padding-bottom:14px;">A fan-memory app for tracking your concerts, games, and Broadway shows.<br>Concerts &middot; Sports &middot; Travel &mdash; remembered.</div>
-            <div style="font-family:${sans}; font-size:12px; line-height:19px; color:#8E86AD;">Questions? Reply to this email, or reach us at <a href="mailto:hello@saltydigital.com" style="color:#FAC775; text-decoration:underline;">hello@saltydigital.com</a>.<br>${referralLine}
+            <div style="font-family:${sans}; font-size:12px; line-height:19px; color:#8E86AD;">Questions? Reply to this email, or reach us at <a href="mailto:support@support.saltydigital.ai" style="color:#FAC775; text-decoration:underline;">support@support.saltydigital.ai</a>.<br>${referralLine}
               <span style="color:#8E86AD;">${unsubPrefix}Salty Digital, Delaware, USA &nbsp;&middot;&nbsp; &copy; 2026 Salty Digital. All rights reserved.</span>
             </div>
           </td>
@@ -191,7 +191,7 @@ Lifetime premium, free, for as long as Salty is running - the same thing we prom
 
 Once you are in, anything that feels wrong goes straight to us from the menu -> Feedback. We read every one.
 
-Questions? Reply to this email, or reach us at hello@saltydigital.com.
+Questions? Reply to this email, or reach us at support@support.saltydigital.ai.
 You're receiving this because you're on the Salty beta waitlist.${input.referralUrl ? `\nYour referral link: ${input.referralUrl}` : ''}
 ${input.unsubscribeUrl ? `Unsubscribe: ${input.unsubscribeUrl}\n` : ''}Salty Digital, Delaware, USA - (c) 2026 Salty Digital. All rights reserved.`
 
