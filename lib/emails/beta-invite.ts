@@ -10,9 +10,14 @@ function escapeHtml(value: string): string {
 /** Default subject for the beta invite (overridable from the composer). */
 export const BETA_INVITE_SUBJECT = "You're in — the Salty beta is live"
 
-// Real install links baked into the invite (from emails/beta-invite.html).
-const TESTFLIGHT_URL = 'https://testflight.apple.com/join/GUKpEDx4'
-const PLAY_URL = 'https://play.google.com/apps/internaltest/4700461200781054089'
+// One install link for every recipient. saltydigital.com/get reads the device and sends
+// Android to Google Play and iPhone to TestFlight, so this email does not have to know
+// which one arrived - and when Apple approves the App Store build, that page changes and
+// this does not. It also ends the drift that put the INTERNAL-TEST Play URL here while
+// emails/beta-invite.html carried the public listing.
+const INSTALL_URL = 'https://saltydigital.com/get'
+const TESTFLIGHT_URL = INSTALL_URL
+const PLAY_URL = INSTALL_URL
 const WALKTHROUGH_URL = 'https://youtu.be/zcn0DhOlR4U'
 
 /**
@@ -157,7 +162,7 @@ export function renderBetaInviteEmail(input: {
               <table cellpadding="0" cellspacing="0" border="0" style="margin-top:18px;">
                 <tr>
                   <td bgcolor="#5B2FD4" style="background-color:#5B2FD4; border-radius:999px;">
-                    <a href="${TESTFLIGHT_URL}" target="_blank" style="display:inline-block; padding:13px 26px; font-family:'Helvetica Neue',Helvetica,Arial,sans-serif; font-size:15px; font-weight:700; color:#ffffff; text-decoration:none;">Get the iPhone invite</a>
+                    <a href="${TESTFLIGHT_URL}" target="_blank" style="display:inline-block; padding:13px 26px; font-family:'Helvetica Neue',Helvetica,Arial,sans-serif; font-size:15px; font-weight:700; color:#ffffff; text-decoration:none;">Get Salty for iPhone</a>
                   </td>
                 </tr>
               </table>
@@ -178,18 +183,10 @@ export function renderBetaInviteEmail(input: {
               <table width="100%" cellpadding="0" cellspacing="0" border="0">
                 <tr>
                   <td width="32" valign="top" style="padding-bottom:9px;"><table cellpadding="0" cellspacing="0" border="0"><tr><td width="22" height="22" bgcolor="#eef0fb" align="center" style="background-color:#eef0fb; border-radius:11px; font-family:'Helvetica Neue',Helvetica,Arial,sans-serif; font-size:11px; font-weight:700; color:#5B2FD4; line-height:22px;">1</td></tr></table></td>
-                  <td valign="top" style="padding-bottom:9px; font-family:'Helvetica Neue',Helvetica,Arial,sans-serif; font-size:15px; line-height:22px; color:#1a1530;">Tap the button below to join our Google Play beta testing group.</td>
+                  <td valign="top" style="padding-bottom:9px; font-family:'Helvetica Neue',Helvetica,Arial,sans-serif; font-size:15px; line-height:22px; color:#1a1530;">Tap the button below &mdash; it opens Salty on Google Play.</td>
                 </tr>
                 <tr>
-                  <td width="32" valign="top" style="padding-bottom:9px;"><table cellpadding="0" cellspacing="0" border="0"><tr><td width="22" height="22" bgcolor="#eef0fb" align="center" style="background-color:#eef0fb; border-radius:11px; font-family:'Helvetica Neue',Helvetica,Arial,sans-serif; font-size:11px; font-weight:700; color:#5B2FD4; line-height:22px;">2</td></tr></table></td>
-                  <td valign="top" style="padding-bottom:9px; font-family:'Helvetica Neue',Helvetica,Arial,sans-serif; font-size:15px; line-height:22px; color:#1a1530;">Sign in with your Google account if prompted, then select <strong>Become a tester</strong>.</td>
-                </tr>
-                <tr>
-                  <td width="32" valign="top" style="padding-bottom:9px;"><table cellpadding="0" cellspacing="0" border="0"><tr><td width="22" height="22" bgcolor="#eef0fb" align="center" style="background-color:#eef0fb; border-radius:11px; font-family:'Helvetica Neue',Helvetica,Arial,sans-serif; font-size:11px; font-weight:700; color:#5B2FD4; line-height:22px;">3</td></tr></table></td>
-                  <td valign="top" style="padding-bottom:9px; font-family:'Helvetica Neue',Helvetica,Arial,sans-serif; font-size:15px; line-height:22px; color:#1a1530;">Open the <strong>Google Play Store</strong> and search for Salty &mdash; it'll now show as available to you.</td>
-                </tr>
-                <tr>
-                  <td width="32" valign="top"><table cellpadding="0" cellspacing="0" border="0"><tr><td width="22" height="22" bgcolor="#eef0fb" align="center" style="background-color:#eef0fb; border-radius:11px; font-family:'Helvetica Neue',Helvetica,Arial,sans-serif; font-size:11px; font-weight:700; color:#5B2FD4; line-height:22px;">4</td></tr></table></td>
+                  <td width="32" valign="top"><table cellpadding="0" cellspacing="0" border="0"><tr><td width="22" height="22" bgcolor="#eef0fb" align="center" style="background-color:#eef0fb; border-radius:11px; font-family:'Helvetica Neue',Helvetica,Arial,sans-serif; font-size:11px; font-weight:700; color:#5B2FD4; line-height:22px;">2</td></tr></table></td>
                   <td valign="top" style="font-family:'Helvetica Neue',Helvetica,Arial,sans-serif; font-size:15px; line-height:22px; color:#1a1530;">Tap <strong>Install</strong>, then open Salty and sign in with your email.</td>
                 </tr>
               </table>
@@ -197,7 +194,7 @@ export function renderBetaInviteEmail(input: {
               <table cellpadding="0" cellspacing="0" border="0" style="margin-top:18px;">
                 <tr>
                   <td bgcolor="#5B2FD4" style="background-color:#5B2FD4; border-radius:999px;">
-                    <a href="${PLAY_URL}" target="_blank" style="display:inline-block; padding:13px 26px; font-family:'Helvetica Neue',Helvetica,Arial,sans-serif; font-size:15px; font-weight:700; color:#ffffff; text-decoration:none;">Join the Android beta</a>
+                    <a href="${PLAY_URL}" target="_blank" style="display:inline-block; padding:13px 26px; font-family:'Helvetica Neue',Helvetica,Arial,sans-serif; font-size:15px; font-weight:700; color:#ffffff; text-decoration:none;">Get Salty on Google Play</a>
                   </td>
                 </tr>
               </table>
@@ -370,10 +367,8 @@ iPhone (TestFlight): ${TESTFLIGHT_URL}
   4. Tap Install — Salty downloads like a normal app.
   5. Open Salty and sign in with your email.
 Android (Google Play): ${PLAY_URL}
-  1. Tap the link to join our Google Play beta testing group.
-  2. Sign in with Google if prompted, then select "Become a tester".
-  3. Open the Play Store, search Salty, and tap Install.
-  4. Open Salty and sign in with your email.
+  1. Tap the link - it opens Salty on Google Play.
+  2. Tap Install, then open Salty and sign in with your email.
 
 STEP TWO — YOUR FIRST SESSION
 - Import at least 3 tickets, each a different way: photo, email scan, calendar, manual.
