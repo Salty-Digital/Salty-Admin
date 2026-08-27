@@ -92,7 +92,7 @@ export function renderBetaInviteEmail(input: {
     <tr>
       <td style="padding:20px 32px 0 32px; font-family:'Helvetica Neue',Helvetica,Arial,sans-serif; font-size:16px; line-height:25px; color:#1a1530;">
         <p style="margin:0 0 14px 0;">Hey ${firstName},</p>
-        <p style="margin:0 0 14px 0;">You signed up early, and the wait's over &mdash; <strong style="color:#1A0848;">Salty's beta officially launched on July 15th.</strong> You're one of a small group of first testers, and we wanted to get you everything you need ahead of time.</p>
+        <p style="margin:0 0 14px 0;">You signed up early, and you're in &mdash; <strong style="color:#1A0848;">the Salty beta is open and running.</strong> You're one of a small group of first testers, and this is everything you need to get going.</p>
       </td>
     </tr>
 
@@ -354,7 +354,7 @@ export function renderBetaInviteEmail(input: {
 
 Hey ${firstNameText},
 
-You signed up early, and the wait's over — Salty's beta officially launched on July 15th. You're one of a small group of first testers, and we wanted to get you everything you need ahead of time.
+You signed up early, and you're in — the Salty beta is open and running. You're one of a small group of first testers, and this is everything you need to get going.
 
 NEW HERE? WATCH THIS FIRST
 A quick walkthrough of the app: ${WALKTHROUGH_URL}

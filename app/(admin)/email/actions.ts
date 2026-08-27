@@ -6,6 +6,7 @@ import { assertUUID, assertString, assertEnum } from '@/lib/validate'
 import { sendBulkEmail, sendHtmlEmail } from '@/lib/email'
 import { renderBrandedEmail } from '@/lib/emails/branded'
 import { renderBetaInviteEmail } from '@/lib/emails/beta-invite'
+import { renderBetaReminderEmail } from '@/lib/emails/beta-reminder'
 import { unsubscribeUrl, oneClickUnsubscribeUrl, betaUnsubscribeUrl, betaOneClickUnsubscribeUrl } from '@/lib/unsubscribe'
 import { createV2Client } from '@/lib/supabase/v2'
 
@@ -326,13 +327,21 @@ export async function sendBroadcastAction(
  * there's no admin-typed body: the HTML is fixed and each recipient's first name (from the
  * beta_signups waitlist) is merged into the greeting. Only the subject is editable.
  */
+export type BetaTemplate = 'invite' | 'reminder'
+
 export async function sendBetaInviteAction(
   subjectRaw: string,
   segment: Segment,
+  template: BetaTemplate = 'invite',
 ): Promise<{ sent: number; failed: number; recipients: number }> {
   const admin = await requireAdmin(2)
   const subject = assertString(subjectRaw, 'Subject', 200)
   assertEnum(segment.type, ['all', 'tier', 'active', 'custom', 'beta'] as const, 'Segment')
+  assertEnum(template, ['invite', 'reminder'] as const, 'Template')
+  // 'invite' is the onboarding email a NEW signup also gets automatically from the database
+  // trigger; 'reminder' is the shorter nudge for people already on the list who never
+  // installed. Same recipients, unsubscribe handling and logging either way.
+  const render = template === 'reminder' ? renderBetaReminderEmail : renderBetaInviteEmail
 
   const recipients = await resolveRecipients(segment)
   if (recipients.length === 0) throw new Error('No recipients match this segment.')
@@ -346,7 +355,7 @@ export async function sendBetaInviteAction(
     const listUnsub = recipient.id ? oneClickUnsubscribeUrl(recipient.id)
       : recipient.betaId ? betaOneClickUnsubscribeUrl(recipient.betaId)
         : undefined
-    const rendered = renderBetaInviteEmail({ subject, firstName: recipient.firstName, unsubscribeUrl: unsub })
+    const rendered = render({ subject, firstName: recipient.firstName, unsubscribeUrl: unsub })
     return {
       to: recipient.email,
       subject: rendered.subject,
@@ -359,16 +368,16 @@ export async function sendBetaInviteAction(
   const { sent, failed, error } = await sendBulkEmail(messages)
 
   const storedSegment =
-    segment.type === 'custom' ? { type: 'custom', emailCount: recipients.length, template: 'beta-invite' }
-      : segment.type === 'beta' ? { type: 'beta', betaStatus: segment.betaStatus ?? 'all', recipientCount: recipients.length, template: 'beta-invite' }
-        : { ...segment, template: 'beta-invite' }
+    segment.type === 'custom' ? { type: 'custom', emailCount: recipients.length, template: `beta-${template}` }
+      : segment.type === 'beta' ? { type: 'beta', betaStatus: segment.betaStatus ?? 'all', recipientCount: recipients.length, template: `beta-${template}` }
+        : { ...segment, template: `beta-${template}` }
 
   const db = createServiceClient()
   try {
     await db.from('email_campaigns').insert({
       admin_id: admin.id,
       subject,
-      body: '(Beta invite — pre-designed HTML template)',
+      body: `(Beta ${template} — pre-designed HTML template)`,
       segment: storedSegment,
       recipient_count: recipients.length,
       sent_count: sent,

@@ -5,11 +5,14 @@ import { ExternalLink, Loader2, Mail, Rocket, Users } from 'lucide-react'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { TemplatePicker } from '@/components/ui/template-picker'
 import { EMAIL_TEMPLATES } from '@/lib/message-templates'
-import { countRecipientsAction, sendBroadcastAction, sendBetaInviteAction, sendSingleEmailAction, type Segment } from './actions'
+import { countRecipientsAction, sendBroadcastAction, sendBetaInviteAction, sendSingleEmailAction, type BetaTemplate, type Segment } from './actions'
 
 // Mirrors BETA_INVITE_SUBJECT in lib/emails/beta-invite.ts (kept local so the big
 // server-side email module isn't pulled into the client bundle).
 const DEFAULT_BETA_SUBJECT = "You're in — the Salty beta is live"
+// The reminder leads on curiosity rather than an announcement: these people already know
+// what Salty is, they just never installed it.
+const DEFAULT_BETA_REMINDER_SUBJECT = "The shows you've forgotten you went to"
 
 const TIERS = ['free', 'premium', 'family']
 const ACTIVE_WINDOWS = [7, 30, 90]
@@ -343,6 +346,7 @@ function BroadcastForm() {
  * waitlist (default: not-signed-up), or a pasted list for sending yourself a test.
  */
 function BetaInviteForm() {
+  const [template, setTemplate] = useState<BetaTemplate>('invite')
   const [subject, setSubject] = useState(DEFAULT_BETA_SUBJECT)
   const [segType, setSegType] = useState<'beta' | 'custom'>('beta')
   const [betaStatus, setBetaStatus] = useState<'all' | 'signed' | 'unsigned'>('unsigned')
@@ -392,7 +396,7 @@ function BetaInviteForm() {
     setResult(null)
     startTransition(async () => {
       try {
-        const res = await sendBetaInviteAction(subject.trim(), segment)
+        const res = await sendBetaInviteAction(subject.trim(), segment, template)
         setResult({
           type: 'success',
           msg: `Sent to ${res.sent} of ${res.recipients} recipient${res.recipients !== 1 ? 's' : ''}${res.failed ? ` — ${res.failed} failed` : ''}.`,
@@ -406,9 +410,42 @@ function BetaInviteForm() {
   return (
     <div className="rounded-[14px] border border-salty-border bg-warm-white p-6 space-y-4 max-w-xl">
       <div className="rounded-lg border border-[#E7DFFA] bg-[#F2ECFD] px-3 py-2.5 text-[12px] text-[#5B2FD4]">
-        Sends the pre-designed <strong>Salty beta invite</strong> — TestFlight + Google Play install
-        steps, first-session checklist, and in-app feedback guide. Each recipient&apos;s first name is
-        filled in automatically. Banned and unsubscribed addresses are always excluded.
+        {template === 'invite'
+          ? <>Sends the pre-designed <strong>Salty beta invite</strong> — install steps, first-session
+              checklist, and in-app feedback guide. This is also what a NEW signup gets automatically.</>
+          : <>Sends the shorter <strong>install reminder</strong> — one reason, one button, three lines.
+              For people already on the list who never installed.</>}
+        {' '}Each recipient&apos;s first name is filled in automatically. Banned and unsubscribed
+        addresses are always excluded.
+      </div>
+
+      <div>
+        <label className={labelCls}>Template</label>
+        <div className="flex flex-wrap gap-2">
+          {([['invite', 'Beta invite (onboarding)'], ['reminder', 'Install reminder']] as const).map(([val, lbl]) => (
+            <button
+              key={val}
+              type="button"
+              onClick={() => {
+                setTemplate(val)
+                setSubject(val === 'reminder' ? DEFAULT_BETA_REMINDER_SUBJECT : DEFAULT_BETA_SUBJECT)
+              }}
+              className={`rounded-lg border px-3 py-1.5 text-[12px] font-medium transition-colors ${
+                template === val ? 'border-ember bg-ember-light text-ember' : 'border-salty-border bg-cream text-salty-secondary hover:bg-stone'
+              }`}
+            >
+              {lbl}
+            </button>
+          ))}
+        </div>
+        <a
+          href={template === 'reminder' ? '/email/beta-reminder/preview' : '/email/beta-invite/preview'}
+          target="_blank"
+          rel="noreferrer"
+          className="mt-2 inline-block text-[12px] text-ember underline"
+        >
+          Preview this email
+        </a>
       </div>
 
       <div>
