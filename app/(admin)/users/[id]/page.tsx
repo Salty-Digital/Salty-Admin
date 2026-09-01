@@ -15,6 +15,7 @@ import { ResetPasswordButton } from './reset-password-button'
 import { ForceSignOutButton } from './force-signout-button'
 import { TierSelect } from './tier-select'
 import { BanUserDialog } from './ban-user-dialog'
+import { PermissionsPanel } from './permissions-panel'
 import { ArrowLeft, ShieldCheck } from 'lucide-react'
 
 interface PageProps {
@@ -39,6 +40,10 @@ export default async function UserDetailPage({ params }: PageProps) {
     { data: privacy },
     photosCountRes,
     authUserResult,
+    { data: permissionState },
+    { data: scanSchedule },
+    { data: emailScanRuns },
+    { data: photoScanJobs },
   ] = await Promise.all([
     db.from('users').select('*, banned_until').eq('id', id).single(),
     db.from('tickets').select('*').eq('user_id', id).order('imported_at', { ascending: false }).limit(1000),
@@ -52,6 +57,12 @@ export default async function UserDetailPage({ params }: PageProps) {
     // Count only — never fetch a user's photo URLs into the admin app.
     db.from('photos').select('id', { count: 'exact', head: true }).eq('user_id', id),
     db.auth.admin.getUserById(id),
+    // Whether they ever granted photo access, and whether a scan has ever actually run for
+    // them. See permissions-panel.tsx for why this is on the page at all.
+    db.from('user_permission_state').select('*').eq('user_id', id).maybeSingle(),
+    db.from('scan_schedules').select('enabled, frequency, day_of_week, day_of_month, hour, minute, last_run_at').eq('user_id', id).maybeSingle(),
+    db.from('scan_runs').select('source, started_at, finished_at, outcome, error_message, accepted, pending, listed').eq('user_id', id).order('started_at', { ascending: false }).limit(1),
+    db.from('photo_scan_jobs').select('status, started_at, completed_at, matched_count, new_ticket_count, error_message, access_privileges').eq('user_id', id).order('started_at', { ascending: false }).limit(1),
   ])
 
   if (!user) notFound()
@@ -182,6 +193,13 @@ export default async function UserDetailPage({ params }: PageProps) {
           <p className="mt-3 text-[13px] text-salty-muted">No custom privacy settings saved — the app is using its defaults for this user.</p>
         )}
       </div>
+
+      <PermissionsPanel
+        permissions={permissionState ?? null}
+        schedule={scanSchedule ?? null}
+        lastEmailScan={emailScanRuns?.[0] ?? null}
+        lastPhotoScan={photoScanJobs?.[0] ?? null}
+      />
 
       {/* Actions */}
       {(canNotify || canDelete || canManageAuth) && (
